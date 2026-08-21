@@ -796,3 +796,147 @@ html, body {
 }
 
 .toast[hidden] { display: none; }
+
+/* ---------- Satir baglam menusu (sag tik) ---------- */
+
+.ctxmenu {
+  position: fixed;
+  z-index: 30;
+  min-width: 190px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-3);
+  display: flex;
+  flex-direction: column;
+  animation: pop var(--fast) var(--ease);
+}
+
+.ctxmenu[hidden] { display: none; }
+
+.ctxmenu__item {
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.ctxmenu__item:hover { background: var(--surface-3); color: var(--text); }
+.ctxmenu__item:focus-visible { outline: none; box-shadow: var(--ring); }
+.ctxmenu__item--accent { color: var(--accent-strong); font-weight: 600; }
+.ctxmenu__sep { height: 1px; margin: 4px 2px; background: var(--line); }
+
+.ctxmenu__title {
+  padding: 5px 9px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+/* ---------- Analiz gecmisi ---------- */
+
+.ai__history {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 42px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  background: var(--ground);
+}
+
+.ai__history[hidden] { display: none; }
+
+.ai__history-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.ai__history-head .label { flex: 1; }
+
+.ai__history-list { flex: 1; overflow-y: auto; }
+
+.histrow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: background var(--fast) var(--ease);
+}
+
+.histrow:hover { background: var(--surface); border-left-color: var(--accent); }
+.histrow:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.histrow__top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.histrow__label {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.histrow__when {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.histrow__meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai__history-empty {
+  padding: 24px 20px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--t-sm);
+}
+
+.ai-run--custom {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-strong);
+}

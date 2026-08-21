@@ -109,6 +109,7 @@ const history = await mod('lib/history.js');
 const deep = await mod('lib/deepscan.js');
 const ai = await mod('lib/ai.js');
 const md = await mod('lib/markdown.js');
+const aiHist = await mod('lib/ai-history.js');
 
 // ---------------------------------------------------------------------------
 console.log('\n[classify]');
@@ -510,6 +511,158 @@ test('kod blogu ve yatay cizgi', () => {
   host.appendChild(frag);
   assert.strictEqual(host.querySelector('pre').textContent, 'const a = 1;');
   assert.strictEqual(host.querySelectorAll('hr').length, 1);
+});
+
+// ---------------------------------------------------------------------------
+console.log('\n[ai — canli model listesi, hedefli analiz, ozel motorlar]');
+
+test('listModels saglayici yanitini normalize eder ve onbellekler', async () => {
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+    return {
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: 'zzz/late-model', name: 'Late', context_length: 128000, pricing: { prompt: '0.000003', completion: '0.000015' } },
+          { id: 'anthropic/claude-sonnet-4.5', name: 'Sonnet 4.5', context_length: 200000 },
+          { id: 'x-ai/0x-alpha', name: '0x Alpha', context_length: 256000 }
+        ]
+      })
+    };
+  };
+
+  const first = await ai.listModels('openrouter', 'sk-or-v1-test', { force: true });
+  assert.strictEqual(first.error, '');
+  assert.strictEqual(first.models.length, 3);
+  // Bilinen varsayilan basa alinir, gerisi alfabetik
+  assert.strictEqual(first.models[0].id, 'anthropic/claude-sonnet-4.5');
+  // Saglayicida ne varsa listede: sabit kodlu listede olmayan model de gelir
+  assert.ok(first.models.some((m) => m.id === 'x-ai/0x-alpha'), 'stealth model listede olmali');
+
+  // Ikinci cagri onbellekten gelir, ag istegi tekrarlanmaz
+  const before = calls.length;
+  const second = await ai.listModels('openrouter', 'sk-or-v1-test');
+  assert.strictEqual(second.cached, true);
+  assert.strictEqual(calls.length, before, 'onbellek varken tekrar istek atilmamali');
+  delete globalThis.fetch;
+});
+
+test('listModels hata durumunda anlasilir mesaj dondurur', async () => {
+  globalThis.fetch = async () => ({ ok: false, status: 401, statusText: 'Unauthorized', json: async () => ({}) });
+  const res = await ai.listModels('openai', 'sk-bad', { force: true });
+  assert.strictEqual(res.models.length, 0);
+  assert.match(res.error, /Invalid or unauthorized/i);
+  delete globalThis.fetch;
+});
+
+test('searchModels coklu terimle filtreler', () => {
+  const models = [
+    { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet' },
+    { id: 'openai/gpt-4o-mini', name: 'GPT-4o mini' },
+    { id: 'x-ai/0x-alpha', name: '0x Alpha' }
+  ];
+  assert.strictEqual(ai.searchModels(models, 'claude').length, 1);
+  assert.strictEqual(ai.searchModels(models, '0x').length, 1);
+  assert.strictEqual(ai.searchModels(models, 'openai mini').length, 1, 'terimlerin hepsi eslesmeli');
+  assert.strictEqual(ai.searchModels(models, '').length, 3);
+});
+
+test('describeModel baglam ve fiyati okunur yazar', () => {
+  const text = ai.describeModel({ id: 'x', context: 200000, pricing: { prompt: '0.000003', completion: '0.000015' } });
+  assert.match(text, /200K ctx/);
+  assert.match(text, /\$3\.00\/\$15\.00 per 1M/);
+  assert.strictEqual(ai.describeModel({ id: 'y' }), '');
+});
+
+test('findingPrompt bulguyu tasir ve yanlis-pozitif dengesini soyler', () => {
+  const prompt = ai.findingPrompt({
+    type: 'Google API Key', category: 'secret', confidence: 'high',
+    value: 'AIza…***xE', file: 'https://s.com/app.js', snippet: 'key=AIza…***xE'
+  });
+  assert.ok(prompt.includes('Google API Key'));
+  assert.ok(prompt.includes('AIza…***xE'));
+  assert.ok(/false positive/i.test(prompt));
+  assert.ok(/public by design/i.test(prompt), 'client-side anahtarlar icin dengeleyici talimat');
+});
+
+test('scriptPrompt kod varsa ekler, yoksa bunu soyler', () => {
+  const entry = classify.decorate({ url: 'https://cdn.x.com/a.js', kind: 'script', size: 2048 }, 'https://s.com/');
+  const withCode = ai.scriptPrompt(entry, 'console.log(1)');
+  assert.ok(withCode.includes('CONTENT (truncated)'));
+  assert.ok(withCode.includes('console.log(1)'));
+  const without = ai.scriptPrompt(entry, '');
+  assert.ok(/not retrieved/i.test(without));
+  assert.ok(without.includes('third-party'));
+});
+
+test('resolveAnalysis yerlesik ve kullanici tanimli motorlari cozer', () => {
+  assert.strictEqual(ai.resolveAnalysis('surface').id, 'surface');
+  const customs = [{ id: 'c1', label: 'GDPR', instruction: 'Check GDPR exposure.' }];
+  const found = ai.resolveAnalysis('custom:c1', customs);
+  assert.strictEqual(found.label, 'GDPR');
+  assert.strictEqual(found.instruction, 'Check GDPR exposure.');
+  assert.strictEqual(ai.resolveAnalysis('custom:yok', customs), null);
+  assert.strictEqual(ai.resolveAnalysis('freeform'), null, 'serbest soru bir sablon degildir');
+});
+
+test('buildMessages ozel analiz talimatini kullanir', () => {
+  const customs = [{ id: 'c9', label: 'X', instruction: 'MY OWN INSTRUCTION' }];
+  const { user } = ai.buildMessages('custom:c9', '', 'CTX', false, customs);
+  assert.ok(user.startsWith('MY OWN INSTRUCTION'));
+  assert.ok(user.includes('CTX'));
+});
+
+test('renderSourceSamples kaynak kodunu baglama isler', () => {
+  const out = ai.renderSourceSamples([{ path: 'src/pay.ts', code: 'const x = 1;' }]);
+  assert.ok(out.includes('RECOVERED SOURCE CODE'));
+  assert.ok(out.includes('src/pay.ts'));
+  assert.ok(out.includes('const x = 1;'));
+  assert.strictEqual(ai.renderSourceSamples([]), '');
+});
+
+test('collectSourceSamples map indirip icerigi cikarir, bagimliliklari eler', async () => {
+  const map = JSON.stringify({
+    version: 3,
+    sources: ['webpack:///./src/checkout.ts', 'webpack:///./node_modules/lib/index.js'],
+    sourcesContent: ['export const pay = () => {};', 'module.exports = {};']
+  });
+  globalThis.fetch = async () => ({ ok: true, text: async () => map });
+  const samples = await ai.collectSourceSamples([
+    { path: 'src/checkout.ts', hasContent: true, map: 'https://s.com/a.js.map' },
+    { path: 'node_modules/lib/index.js', hasContent: true, map: 'https://s.com/a.js.map' }
+  ]);
+  assert.strictEqual(samples.length, 1, 'node_modules elenmeli');
+  assert.strictEqual(samples[0].path, 'src/checkout.ts');
+  assert.ok(samples[0].code.includes('export const pay'));
+  delete globalThis.fetch;
+});
+
+// ---------------------------------------------------------------------------
+console.log('\n[ai gecmisi]');
+
+test('analiz kaydedilir, sayfaya gore filtrelenir ve silinir', async () => {
+  await aiHist.clearAnalyses();
+  await aiHist.saveAnalysis({ pageUrl: 'https://a.com/x', analysis: 'surface', label: 'Attack surface', text: 'AAA', model: 'm1' });
+  await aiHist.saveAnalysis({ pageUrl: 'https://b.com/y', analysis: 'triage', label: 'Triage', text: 'BBB', model: 'm2' });
+
+  const all = await aiHist.listAnalyses();
+  assert.strictEqual(all.length, 2);
+  assert.strictEqual(all[0].text, 'BBB', 'en yeni basta');
+
+  const forA = await aiHist.listForPage('https://a.com/other-page');
+  assert.strictEqual(forA.length, 1, 'ayni origin eslesir');
+  assert.strictEqual(forA[0].label, 'Attack surface');
+
+  const left = await aiHist.deleteAnalysis(all[0].id);
+  assert.strictEqual(left.length, 1);
+  await aiHist.clearAnalyses();
+  assert.strictEqual((await aiHist.listAnalyses()).length, 0);
+});
+
+test('bos metinli analiz kaydedilmez', async () => {
+  const res = await aiHist.saveAnalysis({ pageUrl: 'https://a.com', text: '' });
+  assert.strictEqual(res, null);
 });
 
 runAll();

@@ -76,10 +76,31 @@
 
       <p class="providers">Works with <strong>Anthropic</strong>, <strong>OpenAI</strong>, <strong>Google Gemini</strong>, <strong>Groq</strong> and <strong>OpenRouter</strong> keys.</p>
 
-      <label class="row row--inline">
-        <span><strong>Model</strong><em>Leave empty to use the best default for your provider. Set it to pin a specific model — the suggestions update once your key is recognised.</em></span>
-        <input type="text" id="aiModel" list="aiModelList" spellcheck="false" autocomplete="off" placeholder="auto">
-        <datalist id="aiModelList"></datalist>
+      <div class="row row--stack">
+        <span><strong>Model</strong><em>Leave empty for automatic selection. The list below is downloaded from your provider, so everything they actually offer is here.</em></span>
+        <div class="modelpick">
+          <div class="modelpick__bar">
+            <input type="search" id="aiModelSearch" class="modelpick__search" placeholder="Search models…" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn btn--sm" id="aiModelRefresh">Refresh list</button>
+          </div>
+          <div class="modelpick__current">
+            <span class="modelpick__label">Selected</span>
+            <input type="text" id="aiModel" class="modelpick__value" spellcheck="false" autocomplete="off" placeholder="auto">
+            <button type="button" class="btn btn--sm btn--ghost" id="aiModelClear">Use auto</button>
+          </div>
+          <div class="modelpick__list" id="aiModelList" role="listbox"></div>
+          <p class="modelpick__status" id="aiModelStatus"></p>
+        </div>
+      </div>
+
+      <label class="row">
+        <input type="checkbox" id="aiIncludeSources">
+        <span><strong>Include recovered source code</strong><em>When Deep Scan has rebuilt real source files from source maps, send a few of them to the AI. Far deeper analysis — and far more of your code leaves the browser.</em></span>
+      </label>
+
+      <label class="row">
+        <input type="checkbox" id="aiSaveHistory">
+        <span><strong>Keep analysis history</strong><em>Store past analyses locally so you can reopen them from the AI tab.</em></span>
       </label>
 
       <label class="row row--inline">
@@ -95,6 +116,17 @@
       <div class="row row--actions">
         <span class="ai-status" id="aiStatus"></span>
         <button type="button" class="btn" id="aiTest">Test connection</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Custom analyses</h2>
+      <p class="providers">Define your own one-click analyses. They appear as buttons in the AI tab next to the built-in ones. Write the instruction the way you would brief a colleague — the collected inventory is appended automatically.</p>
+
+      <div id="customList" class="customs"></div>
+
+      <div class="row row--actions">
+        <button type="button" class="btn" id="customAdd">Add analysis</button>
       </div>
     </section>
 

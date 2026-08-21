@@ -118,8 +118,17 @@
             <button type="button" class="btn btn--danger btn--sm" id="aiStop" hidden>Stop</button>
           </div>
           <div class="ai__out mono" id="aiOut"><p class="ai__placeholder">Pick an analysis or ask a question. The collected inventory is sent to the provider you configured.</p></div>
+
+          <div class="ai__history" id="aiHistory" hidden>
+            <div class="ai__history-head">
+              <span class="label">Saved analyses</span>
+              <button type="button" class="btn btn--sm btn--ghost" id="aiHistoryClose">Close</button>
+            </div>
+            <div class="ai__history-list" id="aiHistoryList"></div>
+          </div>
           <div class="ai__foot">
             <span class="ai__meta mono" id="aiMeta"></span>
+            <button type="button" class="btn btn--sm" id="aiHistoryBtn">History</button>
             <button type="button" class="btn btn--sm" id="aiCopy">Copy</button>
           </div>
         </div>
@@ -136,6 +145,7 @@
       <div class="detail__foot">
         <button type="button" class="btn btn--sm" id="detailCopy">Copy URL</button>
         <button type="button" class="btn btn--sm" id="detailOpen">Open</button>
+        <button type="button" class="btn btn--sm btn--accent" id="detailAskAi">Ask AI</button>
       </div>
     </div>
 
@@ -151,6 +161,8 @@
     </footer>
 
     <p class="note">Deep Scan requests files from the target server. Use it only on sites you are authorized to test.</p>
+
+    <div class="ctxmenu" id="ctxmenu" hidden role="menu"></div>
 
     <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
   </div>

@@ -17,6 +17,7 @@ import { saveSnapshot, getLatestSnapshot } from '../lib/history.js';
 import { diffCaptures } from '../lib/diff.js';
 import { runAnalysis, getApiKey, detectProvider, PROVIDERS, modelsFor } from '../lib/ai.js';
 import { renderMarkdown } from '../lib/markdown.js';
+import { listForPage, saveAnalysis, clearAnalyses } from '../lib/ai-history.js';
 
 const ROW_HEIGHT = 56;   // popup.css --row-h ile ayni olmali
 const OVERSCAN = 6;
@@ -73,7 +74,13 @@ const el = {
   aiStop: document.getElementById('aiStop'),
   aiQuestion: document.getElementById('aiQuestion'),
   aiCopy: document.getElementById('aiCopy'),
-  aiOpenOptions: document.getElementById('aiOpenOptions')
+  aiOpenOptions: document.getElementById('aiOpenOptions'),
+  aiHistoryBtn: document.getElementById('aiHistoryBtn'),
+  aiHistory: document.getElementById('aiHistory'),
+  aiHistoryList: document.getElementById('aiHistoryList'),
+  aiHistoryClose: document.getElementById('aiHistoryClose'),
+  detailAskAi: document.getElementById('detailAskAi'),
+  ctxmenu: document.getElementById('ctxmenu')
 };
 
 const state = {
@@ -98,7 +105,9 @@ const state = {
   aiController: null,
   aiText: '',
   aiHistory: [],      // takip sorulari icin konusma gecmisi
-  aiModel: ''
+  aiModel: '',
+  aiTarget: null,     // hedefli analiz (tek bulgu / tek script)
+  ctxItem: null       // sag tiklanan satir
 };
 
 let searchTimer = null;
@@ -648,6 +657,41 @@ el.list.addEventListener('click', (event) => {
   if (item) openDetail(item);
 });
 
+// Sag tik: satira ozel eylemler (AI'a gonder, kopyala, ac)
+el.list.addEventListener('contextmenu', (event) => {
+  const row = event.target.closest('.row');
+  if (!row || row.dataset.index == null) return;
+  const item = state.filtered[Number(row.dataset.index)];
+  if (!item) return;
+  event.preventDefault();
+  openCtxMenu(item, event.clientX, event.clientY);
+});
+
+// Menuyu disari tiklayinca, kaydirinca veya Esc ile kapat
+document.addEventListener('click', (event) => {
+  if (!el.ctxmenu.hidden && !event.target.closest('.ctxmenu')) hideCtxMenu();
+});
+el.list.addEventListener('scroll', () => { if (!el.ctxmenu.hidden) hideCtxMenu(); }, { passive: true });
+
+el.aiHistoryBtn.addEventListener('click', () => {
+  if (el.aiHistory.hidden) showHistory();
+  else hideHistory();
+});
+el.aiHistoryClose.addEventListener('click', hideHistory);
+
+// Detay panelinden hedefli analiz
+el.detailAskAi.addEventListener('click', () => {
+  const item = state.detailItem;
+  if (!item) return;
+  closeDetail();
+  switchView('ai');
+  if (state.view === 'ai') {
+    if (item.category) runAi('finding', '', { target: item, label: item.type || 'finding' });
+    else if (item.normalizedUrl || item.url) runAi('script', '', { target: item, label: item.fileName || 'script' });
+    else toast('Nothing to analyse here');
+  }
+});
+
 el.detailClose.addEventListener('click', closeDetail);
 el.detailCopy.addEventListener('click', () => copyText(el.detail.dataset.copy, 'Copied'));
 el.detailOpen.addEventListener('click', () => {
@@ -752,7 +796,24 @@ async function setupAiView() {
   const ready = Boolean(settings.aiEnabled) && Boolean(key) && Boolean(providerId);
   el.aiHint.hidden = ready;
   el.aiWork.hidden = !ready;
+  if (ready) renderCustomRuns(settings);
   if (ready && !state.aiRunning) showAiIdentity(providerId, settings);
+}
+
+/** Kullanici tanimli analizleri yerlesiklerin yanina buton olarak ekler. */
+function renderCustomRuns(settings) {
+  for (const old of el.aiRuns.querySelectorAll('.ai-run--custom')) old.remove();
+  const customs = Array.isArray(settings.aiCustomAnalyses) ? settings.aiCustomAnalyses : [];
+  for (const item of customs) {
+    if (!item || !item.instruction || !item.id) continue;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ai-run ai-run--custom';
+    btn.dataset.analysis = `custom:${item.id}`;
+    btn.dataset.label = item.label || 'Custom';
+    btn.textContent = item.label || 'Custom analysis';
+    el.aiRuns.appendChild(btn);
+  }
 }
 
 /**
@@ -783,14 +844,23 @@ function paintAi() {
 }
 
 function aiLabel(analysis) {
-  return analysis === 'freeform' ? 'question' : analysis;
+  if (analysis === 'freeform') return 'question';
+  if (analysis === 'finding') return 'finding';
+  if (analysis === 'script') return 'script';
+  if (typeof analysis === 'string' && analysis.startsWith('custom:')) return 'custom';
+  return analysis;
 }
 
-async function runAi(analysis, question, { followUp = false } = {}) {
+async function runAi(analysis, question, { followUp = false, target = null, label = '' } = {}) {
   if (state.aiRunning) return;
   const q = (question || '').trim();
   if (analysis === 'freeform' && !q) { toast('Type a question first'); return; }
-  if (!state.scripts.length) { toast('Nothing collected to analyze'); return; }
+  // Hedefli analizler tek bir ogeyi inceler; envanterin dolu olmasi sart degil.
+  const targeted = analysis === 'finding' || analysis === 'script';
+  if (!targeted && !state.scripts.length) { toast('Nothing collected to analyze'); return; }
+
+  hideHistory();
+  state.aiTarget = target;
 
   // Yeni analiz konusmayi sifirlar; takip sorusu gecmisi korur.
   if (!followUp) state.aiHistory = [];
@@ -810,6 +880,7 @@ async function runAi(analysis, question, { followUp = false } = {}) {
       data,
       analysis,
       question: q,
+      target,
       history: followUp ? state.aiHistory : [],
       signal: state.aiController.signal,
       onDelta: (chunk) => {
@@ -835,8 +906,21 @@ async function runAi(analysis, question, { followUp = false } = {}) {
     state.aiModel = result && result.model ? result.model : '';
     const providerLabel = result && result.provider && PROVIDERS[result.provider]
       ? PROVIDERS[result.provider].label : '';
-    el.aiMeta.textContent = [providerLabel, state.aiModel, aiLabel(analysis), 'ask a follow-up below']
+    el.aiMeta.textContent = [providerLabel, state.aiModel, label || aiLabel(analysis), 'ask a follow-up below']
       .filter(Boolean).join(' · ');
+
+    // Analizi kalici gecmise yaz (ayarlarda acikken).
+    if (state.settings && state.settings.aiSaveHistory && !followUp) {
+      saveAnalysis({
+        pageUrl: state.pageUrl,
+        analysis,
+        label: label || aiLabel(analysis),
+        question: q,
+        text: state.aiText,
+        model: state.aiModel,
+        provider: result && result.provider ? result.provider : ''
+      }).catch(() => { /* gecmis yazilamazsa analiz yine de duruyor */ });
+    }
     el.aiQuestion.placeholder = 'Follow-up question…';
   } catch (err) {
     const message = (err && err.name === 'AbortError') ? 'Stopped.' : (err && err.message ? err.message : String(err));
@@ -854,9 +938,138 @@ async function runAi(analysis, question, { followUp = false } = {}) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Satir baglam menusu (sag tik)
+// ---------------------------------------------------------------------------
+
+function hideCtxMenu() {
+  el.ctxmenu.hidden = true;
+  state.ctxItem = null;
+}
+
+function ctxButton(label, onClick, accent) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'ctxmenu__item' + (accent ? ' ctxmenu__item--accent' : '');
+  b.textContent = label;
+  b.addEventListener('click', () => { hideCtxMenu(); onClick(); });
+  return b;
+}
+
+/** Ogeye gore menuyu kurup imlecin yaninda acar. */
+function openCtxMenu(item, x, y) {
+  state.ctxItem = item;
+  const menu = el.ctxmenu;
+  menu.textContent = '';
+
+  const title = document.createElement('div');
+  title.className = 'ctxmenu__title';
+  title.textContent = state.view === 'findings' ? (item.type || 'finding')
+    : state.view === 'sources' ? (item.path || '')
+    : (item.fileName || item.normalizedUrl || '');
+  menu.appendChild(title);
+
+  if (state.view === 'findings') {
+    menu.appendChild(ctxButton('Ask AI about this finding', () => {
+      switchView('ai');
+      runAi('finding', '', { target: item, label: item.type || 'finding' });
+    }, true));
+    menu.appendChild(ctxButton('Copy value', () => copyText(item.value, 'Value copied')));
+    menu.appendChild(ctxButton('Copy file URL', () => copyText(item.file, 'URL copied')));
+  } else if (state.view === 'sources') {
+    menu.appendChild(ctxButton('Copy path', () => copyText(item.path, 'Path copied')));
+    if (item.map) menu.appendChild(ctxButton('Copy source map URL', () => copyText(item.map, 'URL copied')));
+  } else {
+    const url = item.normalizedUrl || item.url || '';
+    menu.appendChild(ctxButton('Send to AI', () => {
+      switchView('ai');
+      runAi('script', '', { target: item, label: item.fileName || 'script' });
+    }, true));
+
+    const sep = document.createElement('div');
+    sep.className = 'ctxmenu__sep';
+    menu.appendChild(sep);
+
+    menu.appendChild(ctxButton('Copy URL', () => copyText(url, 'URL copied')));
+    menu.appendChild(ctxButton('Copy as curl', () => copyText(
+      `curl -sS '${url.replace(/'/g, "'\\''")}'`, 'curl command copied')));
+    if (item.sourceMapUrl) {
+      menu.appendChild(ctxButton('Copy source map URL', () => copyText(item.sourceMapUrl, 'URL copied')));
+    }
+    if (/^https?:/i.test(url)) {
+      menu.appendChild(ctxButton('Open in new tab', () => {
+        api.tabs.create({ url }).catch(() => toast('Could not open'));
+      }));
+    }
+  }
+
+  // Once gorunur yap ki olculebilsin, sonra ekrana sigacak sekilde konumla.
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - 8);
+  const top = Math.min(y, window.innerHeight - rect.height - 8);
+  menu.style.left = `${Math.max(6, left)}px`;
+  menu.style.top = `${Math.max(6, top)}px`;
+}
+
+// ---------------------------------------------------------------------------
+// Analiz gecmisi
+// ---------------------------------------------------------------------------
+
+function hideHistory() {
+  el.aiHistory.hidden = true;
+}
+
+function formatWhen(ts) {
+  const d = new Date(ts);
+  const now = Date.now();
+  const mins = Math.round((now - ts) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
+  return d.toLocaleDateString();
+}
+
+async function showHistory() {
+  const list = el.aiHistoryList;
+  list.textContent = '';
+  let entries = [];
+  try { entries = await listForPage(state.pageUrl); } catch { entries = []; }
+
+  if (!entries.length) {
+    const empty = makeEl('p', 'ai__history-empty',
+      'No saved analyses for this site yet. Run one and it will appear here.');
+    list.appendChild(empty);
+  } else {
+    for (const entry of entries) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'histrow';
+
+      const top = makeEl('div', 'histrow__top');
+      top.appendChild(makeEl('span', 'histrow__label', entry.label || entry.analysis));
+      top.appendChild(makeEl('span', 'histrow__when', formatWhen(entry.at)));
+      row.appendChild(top);
+      row.appendChild(makeEl('span', 'histrow__meta',
+        [entry.model, entry.question].filter(Boolean).join(' · ') || entry.pageUrl));
+
+      row.addEventListener('click', () => {
+        state.aiText = entry.text;
+        state.aiHistory = [];          // gecmisten okunan analiz yeni konusma baslatir
+        paintAi();
+        hideHistory();
+        el.aiMeta.textContent = [entry.model, entry.label, formatWhen(entry.at)]
+          .filter(Boolean).join(' · ');
+      });
+      list.appendChild(row);
+    }
+  }
+  el.aiHistory.hidden = false;
+}
+
 el.aiRuns.addEventListener('click', (event) => {
   const btn = event.target.closest('.ai-run');
-  if (btn) runAi(btn.dataset.analysis, '');
+  if (btn) runAi(btn.dataset.analysis, '', { label: btn.dataset.label || '' });
 });
 el.aiRun.addEventListener('click', () => {
   const value = el.aiQuestion.value;
@@ -883,6 +1096,8 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape') {
+    if (!el.ctxmenu.hidden) { hideCtxMenu(); return; }
+    if (!el.aiHistory.hidden) { hideHistory(); return; }
     if (!el.detail.hidden) { closeDetail(); return; }
     if (!el.exportMenu.hidden) { setExportMenu(false); return; }
     el.search.value = '';
