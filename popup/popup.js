@@ -1063,6 +1063,334 @@ async function attachToActiveRun() {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Angajman oturumu
+// ---------------------------------------------------------------------------
+
+function renderSessionBar() {
+  const attached = Boolean(state.session);
+  el.sessionPill.classList.toggle('is-attached', attached);
+  el.sessionName.textContent = attached ? state.session.name : 'Tab only';
+  el.sessionPill.title = attached
+    ? `Attached to “${state.session.name}” — in-scope captures accumulate here`
+    : 'Tab-only capture: cleared when the browser closes. Click to attach an engagement.';
+
+  const isAuth = state.authState === 'auth';
+  el.authToggle.classList.toggle('is-auth', isAuth);
+  el.authLabel.textContent = isAuth ? 'Logged in' : 'Logged out';
+  el.authToggle.title = isAuth
+    ? 'Captures are tagged as authenticated — scripts seen only here become "auth-only"'
+    : 'Captures are tagged as anonymous. Switch after you log in to compare surfaces.';
+
+  const marked = countStates(state.scripts, state.triage);
+  el.sessionCount.textContent = marked.new < state.scripts.length
+    ? `${state.scripts.length - marked.new}/${state.scripts.length} triaged`
+    : '';
+}
+
+function hideSessionMenu() { el.sessionMenu.hidden = true; }
+
+async function openSessionMenu() {
+  const menu = el.sessionMenu;
+  menu.textContent = '';
+
+  const res = await send({ type: 'session-list' });
+  const list = res.ok ? res.sessions : [];
+
+  const makeItem = (name, meta, onClick, active) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sessmenu__item' + (active ? ' is-active' : '');
+    b.appendChild(makeEl('span', 'sessmenu__name', name));
+    if (meta) b.appendChild(makeEl('span', 'sessmenu__meta', meta));
+    b.addEventListener('click', () => { hideSessionMenu(); onClick(); });
+    return b;
+  };
+
+  menu.appendChild(makeItem('Tab only', 'Ephemeral — cleared with the browser',
+    () => attachSession(''), !state.session));
+
+  if (list.length) {
+    const sep = makeEl('div', 'sessmenu__sep');
+    menu.appendChild(sep);
+    for (const item of list) {
+      menu.appendChild(makeItem(
+        item.name,
+        (item.scope || []).join(', ') || 'no scope — captures everything',
+        () => attachSession(item.id),
+        state.session && state.session.id === item.id
+      ));
+    }
+  }
+
+  menu.appendChild(makeEl('div', 'sessmenu__sep'));
+  menu.appendChild(makeItem('New engagement…', 'Scoped to this site by default', createSessionHere, false));
+  menu.hidden = false;
+}
+
+async function attachSession(sessionId) {
+  const res = await send({ type: 'session-attach', tabId: state.tabId, sessionId });
+  if (!res.ok) { toast(res.error || 'Could not attach'); return; }
+  state.session = res.session;
+  renderSessionBar();
+  if (state.view === 'session') applyView();
+  toast(res.session ? `Attached to ${res.session.name}` : 'Tab-only capture');
+}
+
+/** Bu sitenin alan adini varsayilan kapsam alarak yeni angajman kurar. */
+async function createSessionHere() {
+  let host = '';
+  try { host = new URL(state.pageUrl).hostname; } catch { host = ''; }
+  const base = host.split('.').slice(-2).join('.');
+  const res = await send({
+    type: 'session-create',
+    tabId: state.tabId,
+    name: base || 'Engagement',
+    scope: base ? [base, `*.${base}`] : []
+  });
+  if (!res.ok) { toast(res.error || 'Could not create'); return; }
+  state.session = { id: res.session.id, name: res.session.name, scope: res.session.scope };
+  renderSessionBar();
+  switchView('session');
+  toast(`Created ${res.session.name}`);
+}
+
+async function toggleAuthState() {
+  const next = state.authState === 'auth' ? 'anon' : 'auth';
+  const res = await send({ type: 'session-auth', tabId: state.tabId, authState: next });
+  if (!res.ok) { toast(res.error || 'Could not switch'); return; }
+  state.authState = res.authState;
+  renderSessionBar();
+  toast(state.authState === 'auth'
+    ? 'Capturing as logged in'
+    : 'Capturing as logged out');
+}
+
+// --- Oturum gorunumu ---
+
+async function renderSessionView() {
+  const attached = Boolean(state.session);
+  el.sessionEmpty.hidden = attached;
+  el.sessionBody.hidden = !attached;
+  if (!attached) return;
+
+  const res = await send({ type: 'session-data', id: state.session.id });
+  const data = res.ok ? res : { entries: [], findings: [], origins: [], notes: '' };
+  state.sessionData = data;
+
+  const decorated = (data.entries || []).map((e) =>
+    decorate(e, (e.pages && e.pages[0]) || state.pageUrl));
+  const stats = summarize(decorated);
+  const authOnly = decorated.filter((e) => (e.authStates || []).includes('auth')
+    && !(e.authStates || []).includes('anon')).length;
+  const risky = decorated.filter((e) => e.noIntegrity || e.mixedContent).length;
+
+  el.sessionStats.textContent = '';
+  const cards = [
+    ['scripts', stats.total, ''],
+    ['auth-only', authOnly, 'sstat--auth'],
+    ['risk', risky, 'sstat--risk'],
+    ['findings', (data.findings || []).length, '']
+  ];
+  for (const [label, value, cls] of cards) {
+    const card = makeEl('div', `sstat ${cls}`.trim());
+    card.appendChild(makeEl('span', 'sstat__value', String(value)));
+    card.appendChild(makeEl('span', 'sstat__label', label));
+    el.sessionStats.appendChild(card);
+  }
+
+  el.sessionScope.value = (state.session.scope || []).join('\n');
+  el.sessionNotes.value = data.notes || '';
+}
+
+async function exportSession(format) {
+  if (!state.session) { toast('No engagement attached'); return; }
+  const data = state.sessionData || { entries: [], findings: [], origins: [], notes: '' };
+  let analyses = [];
+  try { analyses = await listForPage(state.pageUrl); } catch { analyses = []; }
+
+  const input = {
+    session: state.session,
+    pageUrl: state.pageUrl,
+    entries: data.entries || [],
+    findings: data.findings || [],
+    origins: data.origins || [],
+    notes: data.notes || '',
+    triage: state.triage,
+    analyses
+  };
+
+  const safeName = (state.session.name || 'engagement').replace(/[^a-z0-9._-]/gi, '_');
+  if (format === 'json') {
+    triggerDownload(buildSessionJson(input), 'application/json', 'json');
+    toast('Engagement exported as JSON');
+  } else {
+    triggerDownload(buildSessionReport(input), 'text/html', 'report.html');
+    toast('Report exported');
+  }
+  void safeName;
+}
+
+// ---------------------------------------------------------------------------
+// Triyaj
+// ---------------------------------------------------------------------------
+
+async function refreshTriage() {
+  try { state.triage = await getTriage(state.pageUrl); } catch { state.triage = {}; }
+}
+
+async function markTriage(item, nextState) {
+  if (!item || !item.key) return;
+  state.triage = await setTriageState(state.pageUrl, item.key, nextState);
+  applyView();
+  renderSessionBar();
+  toast(nextState === 'new' ? 'Mark cleared' : `Marked ${STATE_LABELS[nextState].toLowerCase()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Satir baglam menusu (sag tik)
+// ---------------------------------------------------------------------------
+
+function hideCtxMenu() {
+  el.ctxmenu.hidden = true;
+  state.ctxItem = null;
+}
+
+function ctxButton(label, onClick, accent) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'ctxmenu__item' + (accent ? ' ctxmenu__item--accent' : '');
+  b.textContent = label;
+  b.addEventListener('click', () => { hideCtxMenu(); onClick(); });
+  return b;
+}
+
+/** Ogeye gore menuyu kurup imlecin yaninda acar. */
+function openCtxMenu(item, x, y) {
+  state.ctxItem = item;
+  const menu = el.ctxmenu;
+  menu.textContent = '';
+
+  const title = document.createElement('div');
+  title.className = 'ctxmenu__title';
+  title.textContent = state.view === 'findings' ? (item.type || 'finding')
+    : state.view === 'sources' ? (item.path || '')
+    : (item.fileName || item.normalizedUrl || '');
+  menu.appendChild(title);
+
+  if (state.view === 'findings') {
+    menu.appendChild(ctxButton('Ask AI about this finding', () => {
+      switchView('ai');
+      runAi('finding', '', { target: item, label: item.type || 'finding' });
+    }, true));
+    menu.appendChild(ctxButton('Copy value', () => copyText(item.value, 'Value copied')));
+    menu.appendChild(ctxButton('Copy file URL', () => copyText(item.file, 'URL copied')));
+  } else if (state.view === 'sources') {
+    menu.appendChild(ctxButton('Copy path', () => copyText(item.path, 'Path copied')));
+    if (item.map) menu.appendChild(ctxButton('Copy source map URL', () => copyText(item.map, 'URL copied')));
+  } else {
+    const url = item.normalizedUrl || item.url || '';
+    menu.appendChild(ctxButton('Send to AI', () => {
+      switchView('ai');
+      runAi('script', '', { target: item, label: item.fileName || 'script' });
+    }, true));
+
+    const sep = document.createElement('div');
+    sep.className = 'ctxmenu__sep';
+    menu.appendChild(sep);
+
+    const current = state.triage[item.key] || 'new';
+    menu.appendChild(ctxButton(
+      current === 'interesting' ? 'Clear ★ interesting' : 'Mark ★ interesting',
+      () => markTriage(item, current === 'interesting' ? 'new' : 'interesting')));
+    menu.appendChild(ctxButton(
+      current === 'reviewed' ? 'Clear reviewed' : 'Mark reviewed',
+      () => markTriage(item, current === 'reviewed' ? 'new' : 'reviewed')));
+    menu.appendChild(ctxButton(
+      current === 'ignored' ? 'Clear not-relevant' : 'Mark not relevant',
+      () => markTriage(item, current === 'ignored' ? 'new' : 'ignored')));
+
+    const sep2 = document.createElement('div');
+    sep2.className = 'ctxmenu__sep';
+    menu.appendChild(sep2);
+
+    menu.appendChild(ctxButton('Copy URL', () => copyText(url, 'URL copied')));
+    menu.appendChild(ctxButton('Copy as curl', () => copyText(
+      `curl -sS '${url.replace(/'/g, "'\\''")}'`, 'curl command copied')));
+    if (item.sourceMapUrl) {
+      menu.appendChild(ctxButton('Copy source map URL', () => copyText(item.sourceMapUrl, 'URL copied')));
+    }
+    if (/^https?:/i.test(url)) {
+      menu.appendChild(ctxButton('Open in new tab', () => {
+        api.tabs.create({ url }).catch(() => toast('Could not open'));
+      }));
+    }
+  }
+
+  // Once gorunur yap ki olculebilsin, sonra ekrana sigacak sekilde konumla.
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - 8);
+  const top = Math.min(y, window.innerHeight - rect.height - 8);
+  menu.style.left = `${Math.max(6, left)}px`;
+  menu.style.top = `${Math.max(6, top)}px`;
+}
+
+// ---------------------------------------------------------------------------
+// Analiz gecmisi
+// ---------------------------------------------------------------------------
+
+function hideHistory() {
+  el.aiHistory.hidden = true;
+}
+
+function formatWhen(ts) {
+  const d = new Date(ts);
+  const now = Date.now();
+  const mins = Math.round((now - ts) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
+  return d.toLocaleDateString();
+}
+
+async function showHistory() {
+  const list = el.aiHistoryList;
+  list.textContent = '';
+  let entries = [];
+  try { entries = await listForPage(state.pageUrl); } catch { entries = []; }
+
+  if (!entries.length) {
+    const empty = makeEl('p', 'ai__history-empty',
+      'No saved analyses for this site yet. Run one and it will appear here.');
+    list.appendChild(empty);
+  } else {
+    for (const entry of entries) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'histrow';
+
+      const top = makeEl('div', 'histrow__top');
+      top.appendChild(makeEl('span', 'histrow__label', entry.label || entry.analysis));
+      top.appendChild(makeEl('span', 'histrow__when', formatWhen(entry.at)));
+      row.appendChild(top);
+      row.appendChild(makeEl('span', 'histrow__meta',
+        [entry.model, entry.question].filter(Boolean).join(' · ') || entry.pageUrl));
+
+      row.addEventListener('click', () => {
+        state.aiText = entry.text;
+        state.aiHistory = [];          // gecmisten okunan analiz yeni konusma baslatir
+        paintAi();
+        hideHistory();
+        el.aiMeta.textContent = [entry.model, entry.label, formatWhen(entry.at)]
+          .filter(Boolean).join(' · ');
+      });
+      list.appendChild(row);
+    }
+  }
+  el.aiHistory.hidden = false;
+}
+
 el.aiRuns.addEventListener('click', (event) => {
   const btn = event.target.closest('.ai-run');
   if (btn) runAi(btn.dataset.analysis, '', { label: btn.dataset.label || '' });

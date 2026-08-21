@@ -14,9 +14,38 @@ const session = {};
 const local = {};
 const changeListeners = [];
 globalThis.chrome = {
-  runtime: { lastError: null, id: 'test', sendMessage: () => Promise.resolve(), getURL: (p) => 'chrome-extension://x/' + p },
+  runtime: {
+    lastError: null,
+    id: 'test',
+    // Popup'in tam yolunu yurumesi icin mesaj tipine gore gercekci yanit.
+    sendMessage: (msg) => {
+      const type = msg && msg.type;
+      if (type === 'get-tab-data') {
+        return Promise.resolve({
+          ok: true, pageUrl: 'https://example.com/', updatedAt: 1,
+          entries: [{ url: 'https://example.com/a.js', key: 'k1', normalizedUrl: 'https://example.com/a.js', sources: ['network'], statusCode: 200 }],
+          findings: [], origins: [], deepScanRunning: false, session: null, authState: 'anon'
+        });
+      }
+      if (type === 'session-list') return Promise.resolve({ ok: true, sessions: [] });
+      if (type === 'ai-run-status') return Promise.resolve({ ok: true, run: null });
+      return Promise.resolve({ ok: true });
+    },
+    getURL: (p) => 'chrome-extension://x/' + p,
+    openOptionsPage: () => {},
+    getPlatformInfo: (cb) => { if (cb) cb({ os: 'linux' }); },
+    onMessage: { addListener: () => {} },
+    onInstalled: { addListener: () => {} },
+    onStartup: { addListener: () => {} },
+    onSuspend: { addListener: () => {} }
+  },
   action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
-  tabs: { get: async () => ({ id: 1, url: 'https://example.com/' }), query: async () => [] },
+  tabs: {
+    get: async () => ({ id: 1, url: 'https://example.com/' }),
+    query: async () => [{ id: 1, url: 'https://example.com/' }],
+    create: async () => ({}),
+    onRemoved: { addListener: () => {} }
+  },
   storage: {
     session: {
       get: async (k) => (k === null ? { ...session } : { [k]: session[k] }),
@@ -922,6 +951,85 @@ test('hata durumu kaydedilir ve kismi metin korunur', async () => {
   assert.strictEqual(rec.error, 'Rate limited');
   assert.strictEqual(rec.text, 'partial…', 'kismi cikti kaybolmaz');
   await aiHist.clearAnalyses();
+});
+
+// ---------------------------------------------------------------------------
+console.log('\n[popup — yuklenme duman testi]');
+
+// Bu test bir regresyondan dogdu: bir duzenleme popup.js'ten 16 fonksiyonu
+// sildi. Sozdizimi gecerli kaldigi icin `node --check` yakalamadi; arayuz
+// "Reading collected scripts…" ekraninda kilitlendi. Modulu gercekten
+// calistirmak bu sinif hatayi (tanimsiz referans) yakalar.
+test('popup.js tanimsiz referans olmadan yuklenir ve baslar', async () => {
+  const listeners = [];
+  const el = () => {
+    const node = {
+      classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+      dataset: {}, style: {}, hidden: false, value: '', placeholder: '',
+      textContent: '', title: '', disabled: false, scrollTop: 0, clientHeight: 400,
+      addEventListener: (t, fn) => listeners.push([t, fn]),
+      removeEventListener() {}, appendChild: (c) => c, removeChild() {}, remove() {},
+      setAttribute() {}, getAttribute: () => null, hasAttribute: () => false,
+      querySelector: () => el(), querySelectorAll: () => [],
+      closest: () => null, focus() {}, select() {}, click() {},
+      getBoundingClientRect: () => ({ width: 100, height: 100, top: 0, left: 0 }),
+      insertBefore: (c) => c, contains: () => false
+    };
+    return node;
+  };
+
+  const prevDocument = globalThis.document;
+  globalThis.document = {
+    getElementById: () => el(),
+    querySelector: () => el(),
+    querySelectorAll: () => [],
+    createElement: () => el(),
+    createTextNode: () => el(),
+    createDocumentFragment: () => el(),
+    addEventListener: (t, fn) => listeners.push([t, fn]),
+    body: el()
+  };
+  globalThis.window = {
+    addEventListener: (t, fn) => listeners.push([t, fn]),
+    innerWidth: 500, innerHeight: 596,
+    getSelection: () => ''
+  };
+  // Node'da globalThis.navigator salt-okunurdur; gecici olarak tanimla.
+  const navDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { clipboard: { writeText: async () => {} } },
+    configurable: true, writable: true
+  });
+
+  // popup init() bir yoklama zamanlayicisi baslatir; test sonunda Node'un
+  // acik kalmamasi icin zamanlayicilari yakalayip temizliyoruz.
+  const timers = [];
+  const realSetInterval = globalThis.setInterval;
+  globalThis.setInterval = (fn, ms) => { const t = realSetInterval(fn, ms); timers.push(t); return t; };
+
+  let failure = null;
+  const prevUnhandled = process.listeners('unhandledRejection');
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', (err) => { failure = err; });
+
+  try {
+    // Cache-buster: ayni modul iki kez yuklenmesin diye tek sefer calisir.
+    await mod('popup/popup.js');
+    // Modul sonunda init() cagrilir; asenkron zincirin bitmesini bekle.
+    await new Promise((r) => setTimeout(r, 60));
+  } finally {
+    process.removeAllListeners('unhandledRejection');
+    for (const fn of prevUnhandled) process.on('unhandledRejection', fn);
+    for (const t of timers) clearInterval(t);
+    globalThis.setInterval = realSetInterval;
+    globalThis.document = prevDocument;
+    delete globalThis.window;
+    if (navDescriptor) Object.defineProperty(globalThis, 'navigator', navDescriptor);
+    else delete globalThis.navigator;
+  }
+
+  if (failure) throw new Error('popup baslatilirken hata: ' + (failure.message || failure));
+  assert.ok(listeners.length > 10, 'olay dinleyicileri baglanmis olmali');
 });
 
 runAll();

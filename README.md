@@ -13,7 +13,7 @@ A Manifest V3 extension that builds a deduplicated, classified inventory of ever
 [![Chrome 120+](https://img.shields.io/badge/chrome-120%2B-4285F4.svg)](#install)
 [![Firefox 140+](https://img.shields.io/badge/firefox-140%2B-FF7139.svg)](#install)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-e8a33d.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-67%20passing-3ddc97.svg)](test/run.mjs)
+[![Tests](https://img.shields.io/badge/tests-68%20passing-3ddc97.svg)](test/run.mjs)
 
 <img src="docs/screenshots/popup-scripts.png" alt="JSHarvest popup showing a page's script inventory" width="440">
 
@@ -180,7 +180,7 @@ lib/
   report.js                    self-contained HTML report · portable JSON
   export.js      settings.js   serializers · user options
 popup/  panel/  options/       three UI surfaces, one token system
-test/run.mjs                   67 tests, no dependencies
+test/run.mjs                   68 tests, no dependencies
 ```
 
 **Navigation epochs.** Every entry carries a navigation epoch. `onBeforeNavigate` bumps it without clearing the list; `onCommitted` purges only entries from the previous page. A script racing the commit already holds the new epoch, so it survives — while SPA route changes leave the list intact.
@@ -204,7 +204,7 @@ Two features reach the network, both off by default and both under your control:
 No dependencies are needed to build or test — plain ES modules and Node built-ins.
 
 ```bash
-node test/run.mjs          # 67 unit tests
+node test/run.mjs          # 68 unit tests
 node build.mjs             # emit dist/chrome and dist/firefox
 npm run lint:firefox       # web-ext lint (needs npm i)
 npm run package:firefox    # store-ready zip
