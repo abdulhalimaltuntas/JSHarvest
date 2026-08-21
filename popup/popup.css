@@ -1195,3 +1195,8 @@ html, body {
 
 .badge--triage { color: var(--accent-strong); background: var(--accent-tint); }
 .badge--authonly { color: var(--signal); background: var(--signal-tint); }
+
+/* Gecmiste yarim kalan / hatali calismalar */
+.histrow.is-running .histrow__meta { color: var(--accent-strong); }
+.histrow.is-error .histrow__meta,
+.histrow.is-interrupted .histrow__meta { color: var(--risk); }

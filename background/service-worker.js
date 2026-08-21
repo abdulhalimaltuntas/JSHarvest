@@ -12,6 +12,7 @@ import { broadcast } from '../lib/messaging.js';
 import { runDeepScan, cancelDeepScan, isDeepScanRunning } from '../lib/deepscan.js';
 import { getSettings, toDeepScanOptions, DEFAULT_SETTINGS } from '../lib/settings.js';
 import * as sessions from '../lib/sessions.js';
+import { startRun, cancelRun, getRun, activeRunForTab, reconcileHistory } from './ai-runner.js';
 
 /** Izlenen istek tipleri. Lazy chunk'lar cogu zaman xhr/other olarak gelir. */
 const WATCHED_TYPES = ['script', 'xmlhttprequest', 'other'];
@@ -300,6 +301,9 @@ api.runtime.onStartup.addListener(() => {
   store.pruneOrphans().catch(() => { /* yoksayilir */ });
 });
 
+// Worker her uyandiginda: 'running' kalmis analiz kayitlari artik calismiyordur.
+reconcileHistory().catch(() => { /* yoksayilir */ });
+
 // Worker sonlandirilmadan once bekleyen yazmalari bosalt.
 if (api.runtime.onSuspend) {
   api.runtime.onSuspend.addListener(() => {
@@ -421,6 +425,33 @@ async function handleMessage(message, sender) {
     case 'deep-scan-cancel':
       cancelDeepScan(Number(message.tabId));
       return { ok: true };
+    // --- AI calismalari (popup kapansa da devam eder) ---
+    case 'ai-run-start': {
+      const tabId = Number(message.tabId);
+      if (!Number.isFinite(tabId)) return { ok: false, error: 'invalid tabId' };
+      try {
+        const { runId, historyId } = await startRun({
+          tabId,
+          data: message.data,
+          analysis: message.analysis,
+          question: message.question,
+          target: message.target,
+          history: message.history,
+          label: message.label
+        });
+        return { ok: true, runId, historyId };
+      } catch (err) {
+        return { ok: false, error: String(err && err.message ? err.message : err) };
+      }
+    }
+    case 'ai-run-cancel':
+      return { ok: true, cancelled: cancelRun(message.runId) };
+    case 'ai-run-status': {
+      if (message.runId) return { ok: true, run: getRun(message.runId) };
+      const tabId = Number(message.tabId);
+      return { ok: true, run: Number.isFinite(tabId) ? activeRunForTab(tabId) : null };
+    }
+
     // --- Angajman oturumlari ---
     case 'session-list':
       return { ok: true, sessions: await sessions.listSessions({ includeArchived: Boolean(message.includeArchived) }) };

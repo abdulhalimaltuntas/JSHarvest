@@ -13,7 +13,7 @@ A Manifest V3 extension that builds a deduplicated, classified inventory of ever
 [![Chrome 120+](https://img.shields.io/badge/chrome-120%2B-4285F4.svg)](#install)
 [![Firefox 140+](https://img.shields.io/badge/firefox-140%2B-FF7139.svg)](#install)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-e8a33d.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-62%20passing-3ddc97.svg)](test/run.mjs)
+[![Tests](https://img.shields.io/badge/tests-67%20passing-3ddc97.svg)](test/run.mjs)
 
 <img src="docs/screenshots/popup-scripts.png" alt="JSHarvest popup showing a page's script inventory" width="440">
 
@@ -107,7 +107,8 @@ Beyond the built-ins:
 - **Right-click any row → Send to AI** — analyse a single script on its own, with its content fetched and included. Same for a single finding: *is this real, or a false positive?*
 - **Your own analyses** — define custom one-click prompts in Options; they appear as buttons next to the built-in ones.
 - **Recovered source code** (opt-in) — when Deep Scan has rebuilt real source files from source maps, send a few of them along. Reading the actual code beats reading a URL list.
-- **History** — analyses are saved per origin and can be reopened from the AI tab.
+- **Runs survive the popup** — the request is executed in the background, not in the popup page. Click away, close the popup, come back: the analysis is still going and reattaches when you reopen the AI tab.
+- **History** — the analysis is written the moment you submit, so what you asked is never lost. Saved per origin and reopenable from the AI tab; runs the browser cut short are marked *interrupted* rather than pretending to still be working.
 
 ---
 
@@ -163,6 +164,7 @@ Right-click any row for triage marks, copy actions and **Send to AI**.
 
 ```
 background/service-worker.js   webRequest listeners, navigation epochs, badge, router
+background/ai-runner.js        AI runs that outlive the popup, with keepalive
 content/collector.js           DOM layer, all frames
 content/page-hook.js           page-context Worker / ServiceWorker observer
 lib/
@@ -173,12 +175,12 @@ lib/
   sourcemap.js   mine.js       source recovery · secret & endpoint mining
   diff.js        history.js    snapshots and comparison
   ai.js          markdown.js   AI layer · safe Markdown renderer
-  ai-history.js                saved analyses, per origin
+  ai-history.js                saved analyses, per origin, with run status
   sessions.js    triage.js     engagements, scope, auth state · triage marks
   report.js                    self-contained HTML report · portable JSON
   export.js      settings.js   serializers · user options
 popup/  panel/  options/       three UI surfaces, one token system
-test/run.mjs                   62 tests, no dependencies
+test/run.mjs                   67 tests, no dependencies
 ```
 
 **Navigation epochs.** Every entry carries a navigation epoch. `onBeforeNavigate` bumps it without clearing the list; `onCommitted` purges only entries from the previous page. A script racing the commit already holds the new epoch, so it survives — while SPA route changes leave the list intact.
@@ -202,7 +204,7 @@ Two features reach the network, both off by default and both under your control:
 No dependencies are needed to build or test — plain ES modules and Node built-ins.
 
 ```bash
-node test/run.mjs          # 62 unit tests
+node test/run.mjs          # 67 unit tests
 node build.mjs             # emit dist/chrome and dist/firefox
 npm run lint:firefox       # web-ext lint (needs npm i)
 npm run package:firefox    # store-ready zip

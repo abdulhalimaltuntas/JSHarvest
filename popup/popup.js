@@ -15,7 +15,7 @@ import {
 import { getSettings } from '../lib/settings.js';
 import { saveSnapshot, getLatestSnapshot } from '../lib/history.js';
 import { diffCaptures } from '../lib/diff.js';
-import { runAnalysis, getApiKey, detectProvider, PROVIDERS, modelsFor } from '../lib/ai.js';
+import { getApiKey, detectProvider, PROVIDERS, modelsFor } from '../lib/ai.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { listForPage, saveAnalysis, clearAnalyses } from '../lib/ai-history.js';
 import { getTriage, setState as setTriageState, countStates, STATE_LABELS } from '../lib/triage.js';
@@ -121,7 +121,6 @@ const state = {
   detailItem: null,
   settings: null,
   aiRunning: false,
-  aiController: null,
   aiText: '',
   aiHistory: [],      // takip sorulari icin konusma gecmisi
   aiModel: '',
@@ -130,7 +129,9 @@ const state = {
   session: null,      // bagli angajman { id, name, scope }
   authState: 'anon',  // bu sekmede yakalanan kimlik durumu
   triage: {},         // dedupeKey -> durum
-  sessionData: null   // Session gorunumu icin yuklenen oturum verisi
+  sessionData: null,  // Session gorunumu icin yuklenen oturum verisi
+  aiRunId: '',        // background'da devam eden analizin kimligi
+  aiPendingAsk: ''    // yanit bekleyen soru (konusma gecmisi icin)
 };
 
 let searchTimer = null;
@@ -882,7 +883,14 @@ async function setupAiView() {
   el.aiHint.hidden = ready;
   el.aiWork.hidden = !ready;
   if (ready) renderCustomRuns(settings);
-  if (ready && !state.aiRunning) showAiIdentity(providerId, settings);
+  if (!ready) return;
+
+  // Popup kapaninca analiz durmuyor; acilista devam edene baglan.
+  if (!state.aiRunning && !state.aiRunId) {
+    const attached = await attachToActiveRun();
+    if (attached) return;
+  }
+  if (!state.aiRunning) showAiIdentity(providerId, settings);
 }
 
 /** Kullanici tanimli analizleri yerlesiklerin yanina buton olarak ekler. */
@@ -936,419 +944,123 @@ function aiLabel(analysis) {
   return analysis;
 }
 
+/**
+ * Analizi BACKGROUND'da baslatir ve hemen doner.
+ *
+ * Onceden istek popup icinde atiliyordu; kullanici baska yere tiklayip popup
+ * kapaninca sayfa yok oluyor ve fetch iptal oluyordu. Artik popup yalnizca
+ * goruntuleyici: kapatip acabilirsin, analiz calismaya devam eder ve istek
+ * gonderildigi anda gecmise yazilir.
+ */
 async function runAi(analysis, question, { followUp = false, target = null, label = '' } = {}) {
   if (state.aiRunning) return;
   const q = (question || '').trim();
   if (analysis === 'freeform' && !q) { toast('Type a question first'); return; }
-  // Hedefli analizler tek bir ogeyi inceler; envanterin dolu olmasi sart degil.
   const targeted = analysis === 'finding' || analysis === 'script';
   if (!targeted && !state.scripts.length) { toast('Nothing collected to analyze'); return; }
 
   hideHistory();
   state.aiTarget = target;
-
-  // Yeni analiz konusmayi sifirlar; takip sorusu gecmisi korur.
   if (!followUp) state.aiHistory = [];
 
   state.aiRunning = true;
   state.aiText = '';
-  state.aiController = new AbortController();
   el.aiOut.classList.add('is-streaming');
   el.aiOut.textContent = '';
   setAiRunning(true);
-  el.aiMeta.textContent = `${state.aiModel || 'model'} · ${aiLabel(analysis)} · thinking…`;
+  el.aiMeta.textContent = `${label || aiLabel(analysis)} · starting…`;
 
-  const data = { pageUrl: state.pageUrl, entries: state.scripts, findings: state.findings, origins: state.origins };
-  let painted = 0;
-  try {
-    const result = await runAnalysis({
-      data,
-      analysis,
-      question: q,
-      target,
-      history: followUp ? state.aiHistory : [],
-      signal: state.aiController.signal,
-      onDelta: (chunk) => {
-        state.aiText += chunk;
-        // Her parcada tam yeniden cizim pahali; ~80 karakterde bir ciz.
-        if (state.aiText.length - painted > 80) {
-          painted = state.aiText.length;
-          paintAi();
-          el.aiOut.scrollTop = el.aiOut.scrollHeight;
-        }
-      }
-    });
-    paintAi();
-    el.aiOut.scrollTop = el.aiOut.scrollHeight;
-    if (!state.aiText) el.aiOut.textContent = 'The provider returned an empty response.';
-
-    // Konusmayi surdurmek icin gecmisi guncelle.
-    const askedAs = analysis === 'freeform' ? q : `Run the "${analysis}" analysis.`;
-    state.aiHistory.push({ role: 'user', content: askedAs });
-    state.aiHistory.push({ role: 'assistant', content: state.aiText });
-    if (state.aiHistory.length > 8) state.aiHistory = state.aiHistory.slice(-8);
-
-    state.aiModel = result && result.model ? result.model : '';
-    const providerLabel = result && result.provider && PROVIDERS[result.provider]
-      ? PROVIDERS[result.provider].label : '';
-    el.aiMeta.textContent = [providerLabel, state.aiModel, label || aiLabel(analysis), 'ask a follow-up below']
-      .filter(Boolean).join(' · ');
-
-    // Analizi kalici gecmise yaz (ayarlarda acikken).
-    if (state.settings && state.settings.aiSaveHistory && !followUp) {
-      saveAnalysis({
-        pageUrl: state.pageUrl,
-        analysis,
-        label: label || aiLabel(analysis),
-        question: q,
-        text: state.aiText,
-        model: state.aiModel,
-        provider: result && result.provider ? result.provider : ''
-      }).catch(() => { /* gecmis yazilamazsa analiz yine de duruyor */ });
+  const res = await send({
+    type: 'ai-run-start',
+    tabId: state.tabId,
+    analysis,
+    question: q,
+    target,
+    label: label || aiLabel(analysis),
+    history: followUp ? state.aiHistory : [],
+    data: {
+      pageUrl: state.pageUrl,
+      entries: state.scripts,
+      findings: state.findings,
+      origins: state.origins
     }
-    el.aiQuestion.placeholder = 'Follow-up question…';
-  } catch (err) {
-    const message = (err && err.name === 'AbortError') ? 'Stopped.' : (err && err.message ? err.message : String(err));
-    paintAi();
-    const notice = document.createElement('p');
-    notice.className = 'ai__error';
-    notice.textContent = message;
-    el.aiOut.appendChild(notice);
-    el.aiMeta.textContent = 'error';
-  } finally {
+  });
+
+  if (!res.ok) {
     state.aiRunning = false;
-    state.aiController = null;
     el.aiOut.classList.remove('is-streaming');
     setAiRunning(false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Angajman oturumu
-// ---------------------------------------------------------------------------
-
-function renderSessionBar() {
-  const attached = Boolean(state.session);
-  el.sessionPill.classList.toggle('is-attached', attached);
-  el.sessionName.textContent = attached ? state.session.name : 'Tab only';
-  el.sessionPill.title = attached
-    ? `Attached to “${state.session.name}” — in-scope captures accumulate here`
-    : 'Tab-only capture: cleared when the browser closes. Click to attach an engagement.';
-
-  const isAuth = state.authState === 'auth';
-  el.authToggle.classList.toggle('is-auth', isAuth);
-  el.authLabel.textContent = isAuth ? 'Logged in' : 'Logged out';
-  el.authToggle.title = isAuth
-    ? 'Captures are tagged as authenticated — scripts seen only here become "auth-only"'
-    : 'Captures are tagged as anonymous. Switch after you log in to compare surfaces.';
-
-  const marked = countStates(state.scripts, state.triage);
-  el.sessionCount.textContent = marked.new < state.scripts.length
-    ? `${state.scripts.length - marked.new}/${state.scripts.length} triaged`
-    : '';
-}
-
-function hideSessionMenu() { el.sessionMenu.hidden = true; }
-
-async function openSessionMenu() {
-  const menu = el.sessionMenu;
-  menu.textContent = '';
-
-  const res = await send({ type: 'session-list' });
-  const list = res.ok ? res.sessions : [];
-
-  const makeItem = (name, meta, onClick, active) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'sessmenu__item' + (active ? ' is-active' : '');
-    b.appendChild(makeEl('span', 'sessmenu__name', name));
-    if (meta) b.appendChild(makeEl('span', 'sessmenu__meta', meta));
-    b.addEventListener('click', () => { hideSessionMenu(); onClick(); });
-    return b;
-  };
-
-  menu.appendChild(makeItem('Tab only', 'Ephemeral — cleared with the browser',
-    () => attachSession(''), !state.session));
-
-  if (list.length) {
-    const sep = makeEl('div', 'sessmenu__sep');
-    menu.appendChild(sep);
-    for (const item of list) {
-      menu.appendChild(makeItem(
-        item.name,
-        (item.scope || []).join(', ') || 'no scope — captures everything',
-        () => attachSession(item.id),
-        state.session && state.session.id === item.id
-      ));
-    }
+    el.aiMeta.textContent = 'error';
+    toast(res.error || 'Could not start analysis');
+    return;
   }
 
-  menu.appendChild(makeEl('div', 'sessmenu__sep'));
-  menu.appendChild(makeItem('New engagement…', 'Scoped to this site by default', createSessionHere, false));
-  menu.hidden = false;
+  state.aiRunId = res.runId;
+  el.aiMeta.textContent = `${label || aiLabel(analysis)} · running in the background`;
+  // Konusma gecmisine soruyu simdiden ekle; yanit gelince tamamlanir.
+  state.aiPendingAsk = analysis === 'freeform' ? q : `Run the "${analysis}" analysis.`;
 }
 
-async function attachSession(sessionId) {
-  const res = await send({ type: 'session-attach', tabId: state.tabId, sessionId });
-  if (!res.ok) { toast(res.error || 'Could not attach'); return; }
-  state.session = res.session;
-  renderSessionBar();
-  if (state.view === 'session') applyView();
-  toast(res.session ? `Attached to ${res.session.name}` : 'Tab-only capture');
-}
+/** Calisma bitince (veya hata alinca) arayuzu toparla. */
+function finishAiRun(payload) {
+  state.aiRunning = false;
+  state.aiRunId = '';
+  el.aiOut.classList.remove('is-streaming');
+  setAiRunning(false);
 
-/** Bu sitenin alan adini varsayilan kapsam alarak yeni angajman kurar. */
-async function createSessionHere() {
-  let host = '';
-  try { host = new URL(state.pageUrl).hostname; } catch { host = ''; }
-  const base = host.split('.').slice(-2).join('.');
-  const res = await send({
-    type: 'session-create',
-    tabId: state.tabId,
-    name: base || 'Engagement',
-    scope: base ? [base, `*.${base}`] : []
-  });
-  if (!res.ok) { toast(res.error || 'Could not create'); return; }
-  state.session = { id: res.session.id, name: res.session.name, scope: res.session.scope };
-  renderSessionBar();
-  switchView('session');
-  toast(`Created ${res.session.name}`);
-}
+  if (payload.text) state.aiText = payload.text;
+  paintAi();
+  el.aiOut.scrollTop = el.aiOut.scrollHeight;
 
-async function toggleAuthState() {
-  const next = state.authState === 'auth' ? 'anon' : 'auth';
-  const res = await send({ type: 'session-auth', tabId: state.tabId, authState: next });
-  if (!res.ok) { toast(res.error || 'Could not switch'); return; }
-  state.authState = res.authState;
-  renderSessionBar();
-  toast(state.authState === 'auth'
-    ? 'Capturing as logged in'
-    : 'Capturing as logged out');
-}
-
-// --- Oturum gorunumu ---
-
-async function renderSessionView() {
-  const attached = Boolean(state.session);
-  el.sessionEmpty.hidden = attached;
-  el.sessionBody.hidden = !attached;
-  if (!attached) return;
-
-  const res = await send({ type: 'session-data', id: state.session.id });
-  const data = res.ok ? res : { entries: [], findings: [], origins: [], notes: '' };
-  state.sessionData = data;
-
-  const decorated = (data.entries || []).map((e) =>
-    decorate(e, (e.pages && e.pages[0]) || state.pageUrl));
-  const stats = summarize(decorated);
-  const authOnly = decorated.filter((e) => (e.authStates || []).includes('auth')
-    && !(e.authStates || []).includes('anon')).length;
-  const risky = decorated.filter((e) => e.noIntegrity || e.mixedContent).length;
-
-  el.sessionStats.textContent = '';
-  const cards = [
-    ['scripts', stats.total, ''],
-    ['auth-only', authOnly, 'sstat--auth'],
-    ['risk', risky, 'sstat--risk'],
-    ['findings', (data.findings || []).length, '']
-  ];
-  for (const [label, value, cls] of cards) {
-    const card = makeEl('div', `sstat ${cls}`.trim());
-    card.appendChild(makeEl('span', 'sstat__value', String(value)));
-    card.appendChild(makeEl('span', 'sstat__label', label));
-    el.sessionStats.appendChild(card);
+  if (payload.error) {
+    const notice = document.createElement('p');
+    notice.className = 'ai__error';
+    notice.textContent = payload.error;
+    el.aiOut.appendChild(notice);
+    el.aiMeta.textContent = 'error';
+    return;
   }
 
-  el.sessionScope.value = (state.session.scope || []).join('\n');
-  el.sessionNotes.value = data.notes || '';
+  if (!state.aiText) {
+    el.aiOut.textContent = 'The provider returned an empty response.';
+    return;
+  }
+
+  state.aiModel = payload.model || state.aiModel;
+  if (state.aiPendingAsk) {
+    state.aiHistory.push({ role: 'user', content: state.aiPendingAsk });
+    state.aiHistory.push({ role: 'assistant', content: state.aiText });
+    if (state.aiHistory.length > 8) state.aiHistory = state.aiHistory.slice(-8);
+    state.aiPendingAsk = '';
+  }
+
+  const providerLabel = payload.provider && PROVIDERS[payload.provider]
+    ? PROVIDERS[payload.provider].label : '';
+  el.aiMeta.textContent = [providerLabel, state.aiModel, payload.label, 'ask a follow-up below']
+    .filter(Boolean).join(' · ');
+  el.aiQuestion.placeholder = 'Follow-up question…';
 }
 
-async function exportSession(format) {
-  if (!state.session) { toast('No engagement attached'); return; }
-  const data = state.sessionData || { entries: [], findings: [], origins: [], notes: '' };
-  let analyses = [];
-  try { analyses = await listForPage(state.pageUrl); } catch { analyses = []; }
+/** Popup acildiginda background'da devam eden bir analiz varsa ona baglan. */
+async function attachToActiveRun() {
+  const res = await send({ type: 'ai-run-status', tabId: state.tabId });
+  const run = res.ok ? res.run : null;
+  if (!run) return false;
 
-  const input = {
-    session: state.session,
-    pageUrl: state.pageUrl,
-    entries: data.entries || [],
-    findings: data.findings || [],
-    origins: data.origins || [],
-    notes: data.notes || '',
-    triage: state.triage,
-    analyses
-  };
+  state.aiRunId = run.runId;
+  state.aiText = run.text || '';
+  state.aiModel = run.model || '';
+  paintAi();
 
-  const safeName = (state.session.name || 'engagement').replace(/[^a-z0-9._-]/gi, '_');
-  if (format === 'json') {
-    triggerDownload(buildSessionJson(input), 'application/json', 'json');
-    toast('Engagement exported as JSON');
+  if (run.running) {
+    state.aiRunning = true;
+    el.aiOut.classList.add('is-streaming');
+    setAiRunning(true);
+    el.aiMeta.textContent = `${run.label || aiLabel(run.analysis)} · running in the background`;
   } else {
-    triggerDownload(buildSessionReport(input), 'text/html', 'report.html');
-    toast('Report exported');
+    finishAiRun(run);
   }
-  void safeName;
-}
-
-// ---------------------------------------------------------------------------
-// Triyaj
-// ---------------------------------------------------------------------------
-
-async function refreshTriage() {
-  try { state.triage = await getTriage(state.pageUrl); } catch { state.triage = {}; }
-}
-
-async function markTriage(item, nextState) {
-  if (!item || !item.key) return;
-  state.triage = await setTriageState(state.pageUrl, item.key, nextState);
-  applyView();
-  renderSessionBar();
-  toast(nextState === 'new' ? 'Mark cleared' : `Marked ${STATE_LABELS[nextState].toLowerCase()}`);
-}
-
-// ---------------------------------------------------------------------------
-// Satir baglam menusu (sag tik)
-// ---------------------------------------------------------------------------
-
-function hideCtxMenu() {
-  el.ctxmenu.hidden = true;
-  state.ctxItem = null;
-}
-
-function ctxButton(label, onClick, accent) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'ctxmenu__item' + (accent ? ' ctxmenu__item--accent' : '');
-  b.textContent = label;
-  b.addEventListener('click', () => { hideCtxMenu(); onClick(); });
-  return b;
-}
-
-/** Ogeye gore menuyu kurup imlecin yaninda acar. */
-function openCtxMenu(item, x, y) {
-  state.ctxItem = item;
-  const menu = el.ctxmenu;
-  menu.textContent = '';
-
-  const title = document.createElement('div');
-  title.className = 'ctxmenu__title';
-  title.textContent = state.view === 'findings' ? (item.type || 'finding')
-    : state.view === 'sources' ? (item.path || '')
-    : (item.fileName || item.normalizedUrl || '');
-  menu.appendChild(title);
-
-  if (state.view === 'findings') {
-    menu.appendChild(ctxButton('Ask AI about this finding', () => {
-      switchView('ai');
-      runAi('finding', '', { target: item, label: item.type || 'finding' });
-    }, true));
-    menu.appendChild(ctxButton('Copy value', () => copyText(item.value, 'Value copied')));
-    menu.appendChild(ctxButton('Copy file URL', () => copyText(item.file, 'URL copied')));
-  } else if (state.view === 'sources') {
-    menu.appendChild(ctxButton('Copy path', () => copyText(item.path, 'Path copied')));
-    if (item.map) menu.appendChild(ctxButton('Copy source map URL', () => copyText(item.map, 'URL copied')));
-  } else {
-    const url = item.normalizedUrl || item.url || '';
-    menu.appendChild(ctxButton('Send to AI', () => {
-      switchView('ai');
-      runAi('script', '', { target: item, label: item.fileName || 'script' });
-    }, true));
-
-    const sep = document.createElement('div');
-    sep.className = 'ctxmenu__sep';
-    menu.appendChild(sep);
-
-    const current = state.triage[item.key] || 'new';
-    menu.appendChild(ctxButton(
-      current === 'interesting' ? 'Clear ★ interesting' : 'Mark ★ interesting',
-      () => markTriage(item, current === 'interesting' ? 'new' : 'interesting')));
-    menu.appendChild(ctxButton(
-      current === 'reviewed' ? 'Clear reviewed' : 'Mark reviewed',
-      () => markTriage(item, current === 'reviewed' ? 'new' : 'reviewed')));
-    menu.appendChild(ctxButton(
-      current === 'ignored' ? 'Clear not-relevant' : 'Mark not relevant',
-      () => markTriage(item, current === 'ignored' ? 'new' : 'ignored')));
-
-    const sep2 = document.createElement('div');
-    sep2.className = 'ctxmenu__sep';
-    menu.appendChild(sep2);
-
-    menu.appendChild(ctxButton('Copy URL', () => copyText(url, 'URL copied')));
-    menu.appendChild(ctxButton('Copy as curl', () => copyText(
-      `curl -sS '${url.replace(/'/g, "'\\''")}'`, 'curl command copied')));
-    if (item.sourceMapUrl) {
-      menu.appendChild(ctxButton('Copy source map URL', () => copyText(item.sourceMapUrl, 'URL copied')));
-    }
-    if (/^https?:/i.test(url)) {
-      menu.appendChild(ctxButton('Open in new tab', () => {
-        api.tabs.create({ url }).catch(() => toast('Could not open'));
-      }));
-    }
-  }
-
-  // Once gorunur yap ki olculebilsin, sonra ekrana sigacak sekilde konumla.
-  menu.hidden = false;
-  const rect = menu.getBoundingClientRect();
-  const left = Math.min(x, window.innerWidth - rect.width - 8);
-  const top = Math.min(y, window.innerHeight - rect.height - 8);
-  menu.style.left = `${Math.max(6, left)}px`;
-  menu.style.top = `${Math.max(6, top)}px`;
-}
-
-// ---------------------------------------------------------------------------
-// Analiz gecmisi
-// ---------------------------------------------------------------------------
-
-function hideHistory() {
-  el.aiHistory.hidden = true;
-}
-
-function formatWhen(ts) {
-  const d = new Date(ts);
-  const now = Date.now();
-  const mins = Math.round((now - ts) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 60 * 24) return `${Math.round(mins / 60)}h ago`;
-  return d.toLocaleDateString();
-}
-
-async function showHistory() {
-  const list = el.aiHistoryList;
-  list.textContent = '';
-  let entries = [];
-  try { entries = await listForPage(state.pageUrl); } catch { entries = []; }
-
-  if (!entries.length) {
-    const empty = makeEl('p', 'ai__history-empty',
-      'No saved analyses for this site yet. Run one and it will appear here.');
-    list.appendChild(empty);
-  } else {
-    for (const entry of entries) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'histrow';
-
-      const top = makeEl('div', 'histrow__top');
-      top.appendChild(makeEl('span', 'histrow__label', entry.label || entry.analysis));
-      top.appendChild(makeEl('span', 'histrow__when', formatWhen(entry.at)));
-      row.appendChild(top);
-      row.appendChild(makeEl('span', 'histrow__meta',
-        [entry.model, entry.question].filter(Boolean).join(' · ') || entry.pageUrl));
-
-      row.addEventListener('click', () => {
-        state.aiText = entry.text;
-        state.aiHistory = [];          // gecmisten okunan analiz yeni konusma baslatir
-        paintAi();
-        hideHistory();
-        el.aiMeta.textContent = [entry.model, entry.label, formatWhen(entry.at)]
-          .filter(Boolean).join(' · ');
-      });
-      list.appendChild(row);
-    }
-  }
-  el.aiHistory.hidden = false;
+  return true;
 }
 
 el.aiRuns.addEventListener('click', (event) => {
@@ -1367,7 +1079,9 @@ el.aiQuestion.addEventListener('keydown', (event) => {
   el.aiQuestion.value = '';
   runAi('freeform', value, { followUp: state.aiHistory.length > 0 });
 });
-el.aiStop.addEventListener('click', () => { if (state.aiController) state.aiController.abort(); });
+el.aiStop.addEventListener('click', () => {
+  if (state.aiRunId) send({ type: 'ai-run-cancel', runId: state.aiRunId });
+});
 el.aiCopy.addEventListener('click', () => copyText(state.aiText, 'Analysis copied'));
 el.aiOpenOptions.addEventListener('click', () => { if (api.runtime.openOptionsPage) api.runtime.openOptionsPage(); });
 
@@ -1405,7 +1119,26 @@ document.addEventListener('keydown', (event) => {
 });
 
 api.runtime.onMessage.addListener((message) => {
-  if (!message || message.tabId !== state.tabId) return;
+  if (!message) return;
+
+  // --- Background'da calisan AI analizinin akisi ---
+  if (message.type === 'ai-run-delta' && message.runId === state.aiRunId) {
+    state.aiText = message.text != null ? message.text : (state.aiText + message.chunk);
+    paintAi();
+    el.aiOut.scrollTop = el.aiOut.scrollHeight;
+    return;
+  }
+  if (message.type === 'ai-run-done' && message.runId === state.aiRunId) {
+    finishAiRun(message);
+    return;
+  }
+  if (message.type === 'ai-run-started' && message.tabId === state.tabId && !state.aiRunId) {
+    // Baska bir popup ornegi baslatmis olabilir; ona baglan.
+    state.aiRunId = message.runId;
+    return;
+  }
+
+  if (message.tabId !== state.tabId) return;
   if (message.type === 'deep-scan-progress') {
     setScanning(true);
     const percent = message.total > 0 ? Math.round((message.done / message.total) * 100) : 0;

@@ -858,4 +858,70 @@ test('bos angajman raporu da gecerli uretir', () => {
   assert.ok(html.includes('Inventory (0)'));
 });
 
+// ---------------------------------------------------------------------------
+console.log('\n[ai calisma dayanikliligi]');
+
+test('istek gonderildigi anda gecmise yazilir (metin bos olsa da)', async () => {
+  await aiHist.clearAnalyses();
+  const started = await aiHist.saveAnalysis({
+    pageUrl: 'https://acme.com/', analysis: 'surface', label: 'Attack surface',
+    question: '', text: '', status: 'running'
+  });
+  assert.ok(started, 'calisma kaydi bos metinle de olusmali');
+  assert.strictEqual(started.status, 'running');
+
+  const list = await aiHist.listAnalyses();
+  assert.strictEqual(list.length, 1, 'popup kapansa bile ne istendigi kayitli');
+  await aiHist.clearAnalyses();
+});
+
+test('bos metinli TAMAMLANMIS kayit yine de reddedilir', async () => {
+  const res = await aiHist.saveAnalysis({ pageUrl: 'https://a.com', text: '', status: 'done' });
+  assert.strictEqual(res, null);
+});
+
+test('calisma bitince ayni kayit tamamlanir, yenisi acilmaz', async () => {
+  await aiHist.clearAnalyses();
+  const started = await aiHist.saveAnalysis({
+    pageUrl: 'https://acme.com/', analysis: 'triage', label: 'Triage', text: '', status: 'running'
+  });
+  const done = await aiHist.updateAnalysis(started.id, {
+    text: 'Final answer.', model: 'm1', provider: 'anthropic', status: 'done'
+  });
+  assert.strictEqual(done.id, started.id, 'ayni kayit guncellenir');
+  assert.strictEqual(done.text, 'Final answer.');
+  assert.strictEqual(done.status, 'done');
+
+  const list = await aiHist.listAnalyses();
+  assert.strictEqual(list.length, 1, 'tek kayit kalmali');
+  await aiHist.clearAnalyses();
+});
+
+test('worker olurse yarim kalan kayit "interrupted" olur, "running" kalmaz', async () => {
+  await aiHist.clearAnalyses();
+  const a = await aiHist.saveAnalysis({ pageUrl: 'https://a.com/', analysis: 'surface', text: '', status: 'running' });
+  const b = await aiHist.saveAnalysis({ pageUrl: 'https://a.com/', analysis: 'tech', text: '', status: 'running' });
+
+  // b hala calisiyor, a degil
+  await aiHist.markOrphansInterrupted([b.id]);
+
+  const list = await aiHist.listAnalyses();
+  const after = Object.fromEntries(list.map((x) => [x.id, x]));
+  assert.strictEqual(after[a.id].status, 'interrupted', 'sahipsiz kayit interrupted olur');
+  assert.ok(after[a.id].error, 'sebep yazilir');
+  assert.strictEqual(after[b.id].status, 'running', 'devam eden kayda dokunulmaz');
+  await aiHist.clearAnalyses();
+});
+
+test('hata durumu kaydedilir ve kismi metin korunur', async () => {
+  await aiHist.clearAnalyses();
+  const started = await aiHist.saveAnalysis({ pageUrl: 'https://a.com/', analysis: 'next', text: '', status: 'running' });
+  await aiHist.updateAnalysis(started.id, { text: 'partial…', status: 'error', error: 'Rate limited' });
+  const [rec] = await aiHist.listAnalyses();
+  assert.strictEqual(rec.status, 'error');
+  assert.strictEqual(rec.error, 'Rate limited');
+  assert.strictEqual(rec.text, 'partial…', 'kismi cikti kaybolmaz');
+  await aiHist.clearAnalyses();
+});
+
 runAll();
