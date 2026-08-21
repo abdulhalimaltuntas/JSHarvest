@@ -70,11 +70,17 @@
       </label>
 
       <label class="row row--inline">
-        <span><strong>API key</strong><em>That is all JSHarvest needs — the provider and model are detected from the key. Stored locally in this browser, never synced.</em></span>
+        <span><strong>API key</strong><em>The provider is detected from the key, and a model is picked for you. Stored locally in this browser, never synced.</em></span>
         <input type="password" id="aiKey" spellcheck="false" autocomplete="off" placeholder="sk-ant-… · sk-… · AIza… · gsk_…">
       </label>
 
       <p class="providers">Works with <strong>Anthropic</strong>, <strong>OpenAI</strong>, <strong>Google Gemini</strong>, <strong>Groq</strong> and <strong>OpenRouter</strong> keys.</p>
+
+      <label class="row row--inline">
+        <span><strong>Model</strong><em>Leave empty to use the best default for your provider. Set it to pin a specific model — the suggestions update once your key is recognised.</em></span>
+        <input type="text" id="aiModel" list="aiModelList" spellcheck="false" autocomplete="off" placeholder="auto">
+        <datalist id="aiModelList"></datalist>
+      </label>
 
       <label class="row row--inline">
         <span><strong>Response length</strong><em>Upper bound on tokens per answer.</em></span>

@@ -438,6 +438,31 @@ test('Gemini istek + gecmis rol donusumu', () => {
   assert.strictEqual(ai.PROVIDERS.gemini.parse({ candidates: [{ content: { parts: [{ text: 'g' }] } }] }), 'g');
 });
 
+test('modelsFor saglayici adaylarini dondurur', () => {
+  assert.ok(ai.modelsFor('anthropic').length >= 1);
+  assert.ok(ai.modelsFor('gemini').includes('gemini-2.0-flash'));
+  assert.deepStrictEqual(ai.modelsFor('yok-boyle-saglayici'), []);
+});
+
+test('sabitlenen model once denenir, sonra onbellek, sonra varsayilanlar', async () => {
+  // Override bos: varsayilan sira korunur
+  await settings.updateSettings({ aiModel: '' });
+  const auto = await ai.aiConfig();
+  assert.strictEqual(auto.override, '');
+
+  // Override doluysa aiConfig bunu tasir
+  await settings.updateSettings({ aiModel: 'claude-opus-5' });
+  const pinned = await ai.aiConfig();
+  assert.strictEqual(pinned.override, 'claude-opus-5');
+
+  // Bosluklar kirpilir
+  await settings.updateSettings({ aiModel: '  gpt-4o-mini  ' });
+  const trimmed = await ai.aiConfig();
+  assert.strictEqual(trimmed.override, 'gpt-4o-mini');
+
+  await settings.updateSettings({ aiModel: '' });
+});
+
 test('her saglayicinin aday model listesi var (otomatik yedekleme)', () => {
   for (const [id, p] of Object.entries(ai.PROVIDERS)) {
     assert.ok(Array.isArray(p.models) && p.models.length >= 1, id + ' model adayi yok');
@@ -448,9 +473,11 @@ test('API anahtari storage.local roundtrip + ayarlardan ayri', async () => {
   await ai.setApiKey('sk-ant-secret-123');
   assert.strictEqual(await ai.getApiKey(), 'sk-ant-secret-123');
   const s = await settings.getSettings();
-  assert.ok(!('aiKey' in s), 'anahtar getSettings icinde olmamali');
-  assert.ok(!('aiProvider' in s), 'saglayici artik ayarda tutulmuyor');
-  assert.ok(!('aiModel' in s), 'model artik ayarda tutulmuyor');
+  assert.ok(!('aiKey' in s), 'ANAHTAR getSettings icinde olmamali — ayri storage.local anahtarinda');
+  assert.ok(!('aiProvider' in s), 'saglayici anahtardan tespit edilir, ayarda tutulmaz');
+  // Model ise sir degil: istege bagli bir tercih, ayarlarda tutulur.
+  assert.ok('aiModel' in s, 'model override alani ayarlarda bulunmali');
+  assert.strictEqual(s.aiModel, '', 'varsayilan bos = otomatik sec');
   await ai.setApiKey('');
   assert.strictEqual(await ai.getApiKey(), '');
 });

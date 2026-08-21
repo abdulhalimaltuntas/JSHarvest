@@ -15,7 +15,7 @@ import {
 import { getSettings } from '../lib/settings.js';
 import { saveSnapshot, getLatestSnapshot } from '../lib/history.js';
 import { diffCaptures } from '../lib/diff.js';
-import { runAnalysis, getApiKey, detectProvider } from '../lib/ai.js';
+import { runAnalysis, getApiKey, detectProvider, PROVIDERS, modelsFor } from '../lib/ai.js';
 import { renderMarkdown } from '../lib/markdown.js';
 
 const ROW_HEIGHT = 56;   // popup.css --row-h ile ayni olmali
@@ -744,13 +744,29 @@ el.clear.addEventListener('click', async () => {
 // --- AI gorunumu ---
 
 async function setupAiView() {
-  const settings = state.settings || await getSettings();
+  const settings = await getSettings();   // Options'ta degismis olabilir
   state.settings = settings;
   let key = '';
   try { key = await getApiKey(); } catch { key = ''; }
-  const ready = Boolean(settings.aiEnabled) && Boolean(key) && Boolean(detectProvider(key));
+  const providerId = detectProvider(key);
+  const ready = Boolean(settings.aiEnabled) && Boolean(key) && Boolean(providerId);
   el.aiHint.hidden = ready;
   el.aiWork.hidden = !ready;
+  if (ready && !state.aiRunning) showAiIdentity(providerId, settings);
+}
+
+/**
+ * Calisma oncesinde de hangi saglayici ve modelin kullanilacagini gosterir.
+ * Model sabitlenmemisse saglayicinin ilk adayi gosterilir; gercekte kullanilan
+ * model calisma sonrasinda kesinlesir ve ayni satirda guncellenir.
+ */
+function showAiIdentity(providerId, settings) {
+  const provider = PROVIDERS[providerId];
+  if (!provider) { el.aiMeta.textContent = ''; return; }
+  const pinned = (settings.aiModel || '').trim();
+  const model = state.aiModel || pinned || (modelsFor(providerId)[0] || '');
+  const suffix = pinned ? ' · pinned' : (state.aiModel ? '' : ' · auto');
+  el.aiMeta.textContent = `${provider.label}${model ? ' · ' + model : ''}${suffix}`;
 }
 
 function setAiRunning(active) {
@@ -785,7 +801,7 @@ async function runAi(analysis, question, { followUp = false } = {}) {
   el.aiOut.classList.add('is-streaming');
   el.aiOut.textContent = '';
   setAiRunning(true);
-  el.aiMeta.textContent = `${aiLabel(analysis)} · thinking…`;
+  el.aiMeta.textContent = `${state.aiModel || 'model'} · ${aiLabel(analysis)} · thinking…`;
 
   const data = { pageUrl: state.pageUrl, entries: state.scripts, findings: state.findings, origins: state.origins };
   let painted = 0;
@@ -817,7 +833,10 @@ async function runAi(analysis, question, { followUp = false } = {}) {
     if (state.aiHistory.length > 8) state.aiHistory = state.aiHistory.slice(-8);
 
     state.aiModel = result && result.model ? result.model : '';
-    el.aiMeta.textContent = `${aiLabel(analysis)}${state.aiModel ? ' · ' + state.aiModel : ''} · ask a follow-up below`;
+    const providerLabel = result && result.provider && PROVIDERS[result.provider]
+      ? PROVIDERS[result.provider].label : '';
+    el.aiMeta.textContent = [providerLabel, state.aiModel, aiLabel(analysis), 'ask a follow-up below']
+      .filter(Boolean).join(' · ');
     el.aiQuestion.placeholder = 'Follow-up question…';
   } catch (err) {
     const message = (err && err.name === 'AbortError') ? 'Stopped.' : (err && err.message ? err.message : String(err));
