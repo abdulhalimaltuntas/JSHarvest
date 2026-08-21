@@ -70,3 +70,5 @@ Belirsiz noktalarda secilen varsayimlar. Her satir tek bir karar.
 57. temperature 0.3 sabitlendi: guvenlik analizi tutarlilik ister, yaraticilik degil.
 
 58. Firefox `strict_min_version` 115 -> 140.0 (+ `gecko_android` 142.0) yukseltildi. Neden: `browser_specific_settings.gecko.data_collection_permissions` anahtari Firefox 140 / Android 142 ile geldi; 115 ile birlikte AMO uyumluluk uyarisi veriyordu. Alternatif (anahtari kaldirip 115'te kalmak) reddedildi: veri toplama beyani AI ozelligi nedeniyle dogru olan sey ve Mozilla bunu zorunlu kilma yolunda. Bugun desteklenen en eski Firefox dali zaten 140 ESR oldugundan pratikte kullanici kaybi yok.
+
+59. Model alani istege bagli olarak geri getirildi (kullanici talebi: model adi onemli). Tasarim: alan BOS ise otomatik secim aynen calisir; doluysa o model ilk sirada denenir. Aday sirasi: sabitlenen model -> son calisan (onbellek) -> saglayici varsayilanlari. Sabitlenen model artik yoksa sessizce kalmak yerine digerlerine dusulur, cunku gercekte kullanilan model arayuzde her zaman gosterilir (saglayici + model + pinned/auto etiketi). Model bir sir DEGILDIR; API anahtarindan farkli olarak ayarlarda tutulur.

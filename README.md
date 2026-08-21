@@ -77,7 +77,7 @@ Secret values are masked **everywhere** — the list, the detail panel, the surr
 
 ### AI analysis — bring your own key
 
-Optional, off by default. **Setup is one field: paste an API key.** The provider is detected from its format and the model chosen automatically, falling back if an id has been retired.
+Optional, off by default. **Setup is one field: paste an API key.** The provider is detected from its format and a model is chosen for you, falling back automatically if an id has been retired. You can **pin a specific model** in Options when it matters — leave the field empty to keep automatic selection. The provider and the model actually in use are always shown in the AI tab.
 
 | Key prefix | Provider |
 |---|---|
