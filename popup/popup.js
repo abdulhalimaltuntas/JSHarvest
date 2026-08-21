@@ -18,6 +18,8 @@ import { diffCaptures } from '../lib/diff.js';
 import { runAnalysis, getApiKey, detectProvider, PROVIDERS, modelsFor } from '../lib/ai.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { listForPage, saveAnalysis, clearAnalyses } from '../lib/ai-history.js';
+import { getTriage, setState as setTriageState, countStates, STATE_LABELS } from '../lib/triage.js';
+import { buildSessionReport, buildSessionJson } from '../lib/report.js';
 
 const ROW_HEIGHT = 56;   // popup.css --row-h ile ayni olmali
 const OVERSCAN = 6;
@@ -80,7 +82,24 @@ const el = {
   aiHistoryList: document.getElementById('aiHistoryList'),
   aiHistoryClose: document.getElementById('aiHistoryClose'),
   detailAskAi: document.getElementById('detailAskAi'),
-  ctxmenu: document.getElementById('ctxmenu')
+  ctxmenu: document.getElementById('ctxmenu'),
+  sessionPill: document.getElementById('sessionPill'),
+  sessionDot: document.getElementById('sessionDot'),
+  sessionName: document.getElementById('sessionName'),
+  sessionCount: document.getElementById('sessionCount'),
+  sessionMenu: document.getElementById('sessionMenu'),
+  authToggle: document.getElementById('authToggle'),
+  authLabel: document.getElementById('authLabel'),
+  sessionView: document.getElementById('sessionView'),
+  sessionEmpty: document.getElementById('sessionEmpty'),
+  sessionBody: document.getElementById('sessionBody'),
+  sessionStats: document.getElementById('sessionStats'),
+  sessionScope: document.getElementById('sessionScope'),
+  sessionNotes: document.getElementById('sessionNotes'),
+  sessionReport: document.getElementById('sessionReport'),
+  sessionExportJson: document.getElementById('sessionExportJson'),
+  sessionDelete: document.getElementById('sessionDelete'),
+  sessionCreateEmpty: document.getElementById('sessionCreateEmpty')
 };
 
 const state = {
@@ -107,7 +126,11 @@ const state = {
   aiHistory: [],      // takip sorulari icin konusma gecmisi
   aiModel: '',
   aiTarget: null,     // hedefli analiz (tek bulgu / tek script)
-  ctxItem: null       // sag tiklanan satir
+  ctxItem: null,      // sag tiklanan satir
+  session: null,      // bagli angajman { id, name, scope }
+  authState: 'anon',  // bu sekmede yakalanan kimlik durumu
+  triage: {},         // dedupeKey -> durum
+  sessionData: null   // Session gorunumu icin yuklenen oturum verisi
 };
 
 let searchTimer = null;
@@ -177,12 +200,15 @@ async function load({ silent = false } = {}) {
     .sort(compareEntries);
   state.findings = response.findings || [];
   state.origins = response.origins || [];
+  state.session = response.session || null;
+  state.authState = response.authState || 'anon';
   state.loaded = true;
 
   if (response.deepScanRunning && !state.scanning) setScanning(true);
   applyView();
   renderHeader();
   renderTabCounts();
+  renderSessionBar();
 }
 
 async function refreshSnapshot() {
@@ -243,23 +269,31 @@ function passesChip(entry) {
     case 'bundles': return Boolean(entry.isBundle);
     case 'maps': return Boolean(entry.hasSourceMap) || entry.kind === 'sourcemap';
     case 'risk': return Boolean(entry.noIntegrity) || Boolean(entry.mixedContent);
+    case 'new': return (state.triage[entry.key] || 'new') === 'new';
+    case 'interesting': return state.triage[entry.key] === 'interesting';
+    case 'authonly': return (entry.authStates || []).includes('auth')
+      && !(entry.authStates || []).includes('anon');
     default: return true;
   }
 }
 
 function updateChrome() {
   const isAi = state.view === 'ai';
-  el.controls.style.display = isAi ? 'none' : '';
-  el.list.style.display = isAi ? 'none' : '';
+  const isSession = state.view === 'session';
+  const isPanel = isAi || isSession;
+  el.controls.style.display = isPanel ? 'none' : '';
+  el.list.style.display = isPanel ? 'none' : '';
   el.aiPanel.hidden = !isAi;
-  // Export/Copy/Snapshot AI gorunumunde anlamsiz.
-  for (const b of [el.copyAll, el.exportBtn, el.snapshot]) b.style.display = isAi ? 'none' : '';
-  if (isAi) showStates({});
+  el.sessionView.hidden = !isSession;
+  // Export/Copy/Snapshot yalnizca liste gorunumlerinde anlamli.
+  for (const b of [el.copyAll, el.exportBtn, el.snapshot]) b.style.display = isPanel ? 'none' : '';
+  if (isPanel) showStates({});
 }
 
 function applyView() {
   updateChrome();
   if (state.view === 'ai') { setupAiView(); return; }
+  if (state.view === 'session') { renderSessionView(); return; }
 
   const q = state.query.trim().toLowerCase();
   let items = baseItems();
@@ -350,11 +384,17 @@ function badge(cls, text) { return makeEl('span', `badge ${cls}`, text); }
 function scriptRow(entry) {
   const classes = ['row', entry.party === 'first' ? 'is-first' : 'is-third'];
   if (entry.confidence === 'inferred') classes.push('is-inferred');
+  const triageState = state.triage[entry.key];
+  if (triageState) classes.push(`is-${triageState}`);
   const row = makeEl('div', classes.join(' '));
 
   const top = makeEl('div', 'row__top');
   top.appendChild(makeEl('span', 'row__name', entry.fileName));
   const badges = makeEl('div', 'row__badges');
+  if (triageState === 'interesting') badges.appendChild(badge('badge--triage', '★'));
+  if ((entry.authStates || []).includes('auth') && !(entry.authStates || []).includes('anon')) {
+    badges.appendChild(badge('badge--authonly', 'auth'));
+  }
   if (entry.confidence === 'inferred') badges.appendChild(badge('badge--inferred', 'inferred'));
   if (entry.kind === 'worker' || entry.kind === 'serviceworker') badges.appendChild(badge('badge--worker', 'worker'));
   // Vendor adi tam gosterilir; "Google Tag Manager".split(' ')[0] gibi kisaltma
@@ -673,6 +713,51 @@ document.addEventListener('click', (event) => {
 });
 el.list.addEventListener('scroll', () => { if (!el.ctxmenu.hidden) hideCtxMenu(); }, { passive: true });
 
+// --- Angajman oturumu olaylari ---
+el.sessionPill.addEventListener('click', (event) => {
+  event.stopPropagation();
+  if (el.sessionMenu.hidden) openSessionMenu();
+  else hideSessionMenu();
+});
+document.addEventListener('click', (event) => {
+  if (!el.sessionMenu.hidden && !event.target.closest('.sessmenu') && !event.target.closest('#sessionPill')) {
+    hideSessionMenu();
+  }
+});
+el.authToggle.addEventListener('click', toggleAuthState);
+el.sessionCreateEmpty.addEventListener('click', createSessionHere);
+
+el.sessionScope.addEventListener('change', async () => {
+  if (!state.session) return;
+  const scope = el.sessionScope.value.split('\n').map((x) => x.trim()).filter(Boolean);
+  const res = await send({ type: 'session-update', id: state.session.id, patch: { scope } });
+  if (res.ok && res.session) {
+    state.session = { id: res.session.id, name: res.session.name, scope: res.session.scope };
+    toast('Scope saved');
+  }
+});
+
+el.sessionNotes.addEventListener('change', async () => {
+  if (!state.session) return;
+  await send({ type: 'session-notes', id: state.session.id, notes: el.sessionNotes.value });
+  toast('Notes saved');
+});
+
+el.sessionReport.addEventListener('click', () => exportSession('html'));
+el.sessionExportJson.addEventListener('click', () => exportSession('json'));
+
+el.sessionDelete.addEventListener('click', async () => {
+  if (!state.session) return;
+  const name = state.session.name;
+  await send({ type: 'session-delete', id: state.session.id });
+  await send({ type: 'session-attach', tabId: state.tabId, sessionId: '' });
+  state.session = null;
+  state.sessionData = null;
+  renderSessionBar();
+  applyView();
+  toast(`Deleted ${name}`);
+});
+
 el.aiHistoryBtn.addEventListener('click', () => {
   if (el.aiHistory.hidden) showHistory();
   else hideHistory();
@@ -939,6 +1024,190 @@ async function runAi(analysis, question, { followUp = false, target = null, labe
 }
 
 // ---------------------------------------------------------------------------
+// Angajman oturumu
+// ---------------------------------------------------------------------------
+
+function renderSessionBar() {
+  const attached = Boolean(state.session);
+  el.sessionPill.classList.toggle('is-attached', attached);
+  el.sessionName.textContent = attached ? state.session.name : 'Tab only';
+  el.sessionPill.title = attached
+    ? `Attached to “${state.session.name}” — in-scope captures accumulate here`
+    : 'Tab-only capture: cleared when the browser closes. Click to attach an engagement.';
+
+  const isAuth = state.authState === 'auth';
+  el.authToggle.classList.toggle('is-auth', isAuth);
+  el.authLabel.textContent = isAuth ? 'Logged in' : 'Logged out';
+  el.authToggle.title = isAuth
+    ? 'Captures are tagged as authenticated — scripts seen only here become "auth-only"'
+    : 'Captures are tagged as anonymous. Switch after you log in to compare surfaces.';
+
+  const marked = countStates(state.scripts, state.triage);
+  el.sessionCount.textContent = marked.new < state.scripts.length
+    ? `${state.scripts.length - marked.new}/${state.scripts.length} triaged`
+    : '';
+}
+
+function hideSessionMenu() { el.sessionMenu.hidden = true; }
+
+async function openSessionMenu() {
+  const menu = el.sessionMenu;
+  menu.textContent = '';
+
+  const res = await send({ type: 'session-list' });
+  const list = res.ok ? res.sessions : [];
+
+  const makeItem = (name, meta, onClick, active) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sessmenu__item' + (active ? ' is-active' : '');
+    b.appendChild(makeEl('span', 'sessmenu__name', name));
+    if (meta) b.appendChild(makeEl('span', 'sessmenu__meta', meta));
+    b.addEventListener('click', () => { hideSessionMenu(); onClick(); });
+    return b;
+  };
+
+  menu.appendChild(makeItem('Tab only', 'Ephemeral — cleared with the browser',
+    () => attachSession(''), !state.session));
+
+  if (list.length) {
+    const sep = makeEl('div', 'sessmenu__sep');
+    menu.appendChild(sep);
+    for (const item of list) {
+      menu.appendChild(makeItem(
+        item.name,
+        (item.scope || []).join(', ') || 'no scope — captures everything',
+        () => attachSession(item.id),
+        state.session && state.session.id === item.id
+      ));
+    }
+  }
+
+  menu.appendChild(makeEl('div', 'sessmenu__sep'));
+  menu.appendChild(makeItem('New engagement…', 'Scoped to this site by default', createSessionHere, false));
+  menu.hidden = false;
+}
+
+async function attachSession(sessionId) {
+  const res = await send({ type: 'session-attach', tabId: state.tabId, sessionId });
+  if (!res.ok) { toast(res.error || 'Could not attach'); return; }
+  state.session = res.session;
+  renderSessionBar();
+  if (state.view === 'session') applyView();
+  toast(res.session ? `Attached to ${res.session.name}` : 'Tab-only capture');
+}
+
+/** Bu sitenin alan adini varsayilan kapsam alarak yeni angajman kurar. */
+async function createSessionHere() {
+  let host = '';
+  try { host = new URL(state.pageUrl).hostname; } catch { host = ''; }
+  const base = host.split('.').slice(-2).join('.');
+  const res = await send({
+    type: 'session-create',
+    tabId: state.tabId,
+    name: base || 'Engagement',
+    scope: base ? [base, `*.${base}`] : []
+  });
+  if (!res.ok) { toast(res.error || 'Could not create'); return; }
+  state.session = { id: res.session.id, name: res.session.name, scope: res.session.scope };
+  renderSessionBar();
+  switchView('session');
+  toast(`Created ${res.session.name}`);
+}
+
+async function toggleAuthState() {
+  const next = state.authState === 'auth' ? 'anon' : 'auth';
+  const res = await send({ type: 'session-auth', tabId: state.tabId, authState: next });
+  if (!res.ok) { toast(res.error || 'Could not switch'); return; }
+  state.authState = res.authState;
+  renderSessionBar();
+  toast(state.authState === 'auth'
+    ? 'Capturing as logged in'
+    : 'Capturing as logged out');
+}
+
+// --- Oturum gorunumu ---
+
+async function renderSessionView() {
+  const attached = Boolean(state.session);
+  el.sessionEmpty.hidden = attached;
+  el.sessionBody.hidden = !attached;
+  if (!attached) return;
+
+  const res = await send({ type: 'session-data', id: state.session.id });
+  const data = res.ok ? res : { entries: [], findings: [], origins: [], notes: '' };
+  state.sessionData = data;
+
+  const decorated = (data.entries || []).map((e) =>
+    decorate(e, (e.pages && e.pages[0]) || state.pageUrl));
+  const stats = summarize(decorated);
+  const authOnly = decorated.filter((e) => (e.authStates || []).includes('auth')
+    && !(e.authStates || []).includes('anon')).length;
+  const risky = decorated.filter((e) => e.noIntegrity || e.mixedContent).length;
+
+  el.sessionStats.textContent = '';
+  const cards = [
+    ['scripts', stats.total, ''],
+    ['auth-only', authOnly, 'sstat--auth'],
+    ['risk', risky, 'sstat--risk'],
+    ['findings', (data.findings || []).length, '']
+  ];
+  for (const [label, value, cls] of cards) {
+    const card = makeEl('div', `sstat ${cls}`.trim());
+    card.appendChild(makeEl('span', 'sstat__value', String(value)));
+    card.appendChild(makeEl('span', 'sstat__label', label));
+    el.sessionStats.appendChild(card);
+  }
+
+  el.sessionScope.value = (state.session.scope || []).join('\n');
+  el.sessionNotes.value = data.notes || '';
+}
+
+async function exportSession(format) {
+  if (!state.session) { toast('No engagement attached'); return; }
+  const data = state.sessionData || { entries: [], findings: [], origins: [], notes: '' };
+  let analyses = [];
+  try { analyses = await listForPage(state.pageUrl); } catch { analyses = []; }
+
+  const input = {
+    session: state.session,
+    pageUrl: state.pageUrl,
+    entries: data.entries || [],
+    findings: data.findings || [],
+    origins: data.origins || [],
+    notes: data.notes || '',
+    triage: state.triage,
+    analyses
+  };
+
+  const safeName = (state.session.name || 'engagement').replace(/[^a-z0-9._-]/gi, '_');
+  if (format === 'json') {
+    triggerDownload(buildSessionJson(input), 'application/json', 'json');
+    toast('Engagement exported as JSON');
+  } else {
+    triggerDownload(buildSessionReport(input), 'text/html', 'report.html');
+    toast('Report exported');
+  }
+  void safeName;
+}
+
+// ---------------------------------------------------------------------------
+// Triyaj
+// ---------------------------------------------------------------------------
+
+async function refreshTriage() {
+  try { state.triage = await getTriage(state.pageUrl); } catch { state.triage = {}; }
+}
+
+async function markTriage(item, nextState) {
+  if (!item || !item.key) return;
+  state.triage = await setTriageState(state.pageUrl, item.key, nextState);
+  applyView();
+  renderSessionBar();
+  toast(nextState === 'new' ? 'Mark cleared' : `Marked ${STATE_LABELS[nextState].toLowerCase()}`);
+}
+
+// ---------------------------------------------------------------------------
 // Satir baglam menusu (sag tik)
 // ---------------------------------------------------------------------------
 
@@ -989,6 +1258,21 @@ function openCtxMenu(item, x, y) {
     const sep = document.createElement('div');
     sep.className = 'ctxmenu__sep';
     menu.appendChild(sep);
+
+    const current = state.triage[item.key] || 'new';
+    menu.appendChild(ctxButton(
+      current === 'interesting' ? 'Clear ★ interesting' : 'Mark ★ interesting',
+      () => markTriage(item, current === 'interesting' ? 'new' : 'interesting')));
+    menu.appendChild(ctxButton(
+      current === 'reviewed' ? 'Clear reviewed' : 'Mark reviewed',
+      () => markTriage(item, current === 'reviewed' ? 'new' : 'reviewed')));
+    menu.appendChild(ctxButton(
+      current === 'ignored' ? 'Clear not-relevant' : 'Mark not relevant',
+      () => markTriage(item, current === 'ignored' ? 'new' : 'ignored')));
+
+    const sep2 = document.createElement('div');
+    sep2.className = 'ctxmenu__sep';
+    menu.appendChild(sep2);
 
     menu.appendChild(ctxButton('Copy URL', () => copyText(url, 'URL copied')));
     menu.appendChild(ctxButton('Copy as curl', () => copyText(
@@ -1097,6 +1381,7 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Escape') {
     if (!el.ctxmenu.hidden) { hideCtxMenu(); return; }
+    if (!el.sessionMenu.hidden) { hideSessionMenu(); return; }
     if (!el.aiHistory.hidden) { hideHistory(); return; }
     if (!el.detail.hidden) { closeDetail(); return; }
     if (!el.exportMenu.hidden) { setExportMenu(false); return; }
@@ -1144,7 +1429,7 @@ api.runtime.onMessage.addListener((message) => {
 // ---------------------------------------------------------------------------
 
 function disableActions() {
-  for (const b of [el.deepScan, el.copyAll, el.exportBtn, el.clear, el.snapshot]) b.disabled = true;
+  for (const b of [el.deepScan, el.copyAll, el.exportBtn, el.clear, el.snapshot, el.sessionPill, el.authToggle]) b.disabled = true;
 }
 
 async function init() {
@@ -1184,6 +1469,7 @@ async function init() {
   }
 
   await refreshSnapshot();
+  await refreshTriage();
   await load();
   renderHeader();
   pollTimer = setInterval(() => { load({ silent: true }); }, POLL_INTERVAL_MS);

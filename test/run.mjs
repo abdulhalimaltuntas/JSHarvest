@@ -110,6 +110,9 @@ const deep = await mod('lib/deepscan.js');
 const ai = await mod('lib/ai.js');
 const md = await mod('lib/markdown.js');
 const aiHist = await mod('lib/ai-history.js');
+const sess = await mod('lib/sessions.js');
+const triage = await mod('lib/triage.js');
+const report = await mod('lib/report.js');
 
 // ---------------------------------------------------------------------------
 console.log('\n[classify]');
@@ -663,6 +666,196 @@ test('analiz kaydedilir, sayfaya gore filtrelenir ve silinir', async () => {
 test('bos metinli analiz kaydedilmez', async () => {
   const res = await aiHist.saveAnalysis({ pageUrl: 'https://a.com', text: '' });
   assert.strictEqual(res, null);
+});
+
+// ---------------------------------------------------------------------------
+console.log('\n[angajman oturumlari]');
+
+test('kapsam eslesmesi: tam host, joker ve bos kapsam', () => {
+  assert.strictEqual(sess.matchesScope('acme.com', ['acme.com']), true);
+  assert.strictEqual(sess.matchesScope('www.acme.com', ['acme.com']), false, 'tam host kesin eslesir');
+  assert.strictEqual(sess.matchesScope('www.acme.com', ['*.acme.com']), true);
+  assert.strictEqual(sess.matchesScope('acme.com', ['*.acme.com']), true, 'joker alan adinin kendisini de kapsar');
+  assert.strictEqual(sess.matchesScope('evil-acme.com', ['*.acme.com']), false, 'benzer isim kapsama girmez');
+  assert.strictEqual(sess.matchesScope('any.host', []), true, 'bos kapsam = her sey');
+  assert.strictEqual(sess.urlInScope('https://api.acme.com/a.js', ['*.acme.com']), true);
+  assert.strictEqual(sess.urlInScope('not a url', ['*.acme.com']), false);
+});
+
+test('oturum olustur, guncelle, listele, sil', async () => {
+  const created = await sess.createSession({ name: 'Acme', scope: ['*.acme.com'] });
+  assert.ok(created.id);
+  assert.strictEqual(created.name, 'Acme');
+
+  const updated = await sess.updateSession(created.id, { name: 'Acme Q3', scope: [' *.acme.com ', ''] });
+  assert.strictEqual(updated.name, 'Acme Q3');
+  assert.deepStrictEqual(updated.scope, ['*.acme.com'], 'bosluklar kirpilir, bos girisler elenir');
+
+  const list = await sess.listSessions();
+  assert.ok(list.some((x) => x.id === created.id));
+
+  await sess.deleteSession(created.id);
+  assert.strictEqual((await sess.listSessions()).some((x) => x.id === created.id), false);
+});
+
+test('kayitlar oturuma birikir; sekmeler ve zaman boyunca birlesir', async () => {
+  const s1 = await sess.createSession({ name: 'Merge', scope: [] });
+  await sess.mergeEntries(s1.id, [
+    { url: 'https://acme.com/a.js', sources: ['network'], statusCode: 200 }
+  ], { authState: 'anon', pageUrl: 'https://acme.com/p1' });
+
+  // Ayni dosya baska bir sayfada, baska bir katmandan
+  await sess.mergeEntries(s1.id, [
+    { url: 'https://acme.com/a.js?v=2', sources: ['dom'] },
+    { url: 'https://acme.com/b.js', sources: ['network'] }
+  ], { authState: 'anon', pageUrl: 'https://acme.com/p2' });
+
+  const data = await sess.getData(s1.id);
+  const entries = Object.values(data.entries);
+  assert.strictEqual(entries.length, 2, 'cache-buster ayni dosyayi ikiye bolmemeli');
+  const a = entries.find((e) => e.normalizedUrl.includes('/a.js'));
+  assert.deepStrictEqual([...a.sources].sort(), ['dom', 'network']);
+  assert.deepStrictEqual(a.pages, ['https://acme.com/p1', 'https://acme.com/p2'], 'gorulen sayfalar birikir');
+  await sess.deleteSession(s1.id);
+});
+
+test('auth durumu kaydedilir: yalnizca girisliyken gelen script tespit edilir', async () => {
+  const s2 = await sess.createSession({ name: 'Auth', scope: [] });
+  await sess.mergeEntries(s2.id, [{ url: 'https://acme.com/public.js', sources: ['network'] }], { authState: 'anon' });
+  await sess.mergeEntries(s2.id, [
+    { url: 'https://acme.com/public.js', sources: ['network'] },
+    { url: 'https://acme.com/admin-panel.js', sources: ['network'] }
+  ], { authState: 'auth' });
+
+  const data = await sess.getData(s2.id);
+  const pub = data.entries[Object.keys(data.entries).find((k) => k.includes('public'))];
+  const admin = data.entries[Object.keys(data.entries).find((k) => k.includes('admin'))];
+  assert.deepStrictEqual([...pub.authStates].sort(), ['anon', 'auth']);
+  assert.deepStrictEqual(admin.authStates, ['auth'], 'admin script yalnizca girisliyken gorulmus');
+
+  const sum = await sess.summary(s2.id);
+  assert.strictEqual(sum.authOnly, 1, 'yalnizca-auth sayaci');
+  assert.strictEqual(sum.scripts, 2);
+  await sess.deleteSession(s2.id);
+});
+
+test('bulgular ve kaynaklar deduplike edilerek birikir, notlar saklanir', async () => {
+  const s3 = await sess.createSession({ name: 'Data', scope: [] });
+  await sess.mergeFindings(s3.id, [{ id: 'f1', type: 'AWS' }, { id: 'f1', type: 'AWS' }, { id: 'f2', type: 'JWT' }]);
+  await sess.mergeOrigins(s3.id, [{ path: 'src/a.ts' }, { path: 'src/a.ts' }]);
+  await sess.setNotes(s3.id, 'IDOR suphesi: /v1/internal/export');
+
+  const data = await sess.getData(s3.id);
+  assert.strictEqual(data.findings.length, 2);
+  assert.strictEqual(data.origins.length, 1);
+  assert.ok(data.notes.includes('IDOR'));
+  await sess.deleteSession(s3.id);
+});
+
+test('findSessionForUrl yalnizca autoAttach + kapsami olan oturumu doner', async () => {
+  const off = await sess.createSession({ name: 'Off', scope: ['*.target.com'], autoAttach: false });
+  assert.strictEqual(await sess.findSessionForUrl('https://x.target.com/'), null, 'autoAttach kapali');
+  const on = await sess.createSession({ name: 'On', scope: ['*.target.com'], autoAttach: true });
+  const found = await sess.findSessionForUrl('https://x.target.com/');
+  assert.strictEqual(found && found.id, on.id);
+  assert.strictEqual(await sess.findSessionForUrl('https://other.com/'), null, 'kapsam disi');
+  await sess.deleteSession(off.id);
+  await sess.deleteSession(on.id);
+});
+
+// ---------------------------------------------------------------------------
+console.log('\n[triyaj]');
+
+test('durum atanir, kaldirilir ve origin bazli izole kalir', async () => {
+  await triage.setState('https://a.com/page', 'k1', 'interesting');
+  await triage.setState('https://a.com/other', 'k2', 'reviewed');
+  await triage.setState('https://b.com/page', 'k1', 'ignored');
+
+  const a = await triage.getTriage('https://a.com/anything');
+  assert.strictEqual(a.k1, 'interesting');
+  assert.strictEqual(a.k2, 'reviewed', 'ayni origin, farkli sayfa -> ayni kova');
+
+  const b = await triage.getTriage('https://b.com/');
+  assert.strictEqual(b.k1, 'ignored');
+  assert.strictEqual(b.k2, undefined, 'origin"ler birbirine karismaz');
+
+  await triage.setState('https://a.com/page', 'k1', 'new');
+  const cleared = await triage.getTriage('https://a.com/');
+  assert.strictEqual(cleared.k1, undefined, '"new" isareti kaldirir');
+
+  await triage.clearTriage('https://a.com/');
+  await triage.clearTriage('https://b.com/');
+});
+
+test('countStates dagilimi verir', () => {
+  const entries = [{ key: 'k1' }, { key: 'k2' }, { key: 'k3' }];
+  const counts = triage.countStates(entries, { k1: 'reviewed', k2: 'interesting' });
+  assert.deepStrictEqual(counts, { new: 1, reviewed: 1, interesting: 1, ignored: 0 });
+});
+
+// ---------------------------------------------------------------------------
+console.log('\n[angajman raporu]');
+
+const reportInput = {
+  session: { id: 's1', name: 'Acme Q3', scope: ['*.acme.com'] },
+  pageUrl: 'https://acme.com/',
+  entries: [
+    { url: 'https://acme.com/app.js', normalizedUrl: 'https://acme.com/app.js', key: 'k1',
+      sources: ['network'], statusCode: 200, size: 4096, authStates: ['anon', 'auth'], pages: ['https://acme.com/'] },
+    { url: 'https://acme.com/admin.js', normalizedUrl: 'https://acme.com/admin.js', key: 'k2',
+      sources: ['network'], statusCode: 200, size: 2048, authStates: ['auth'], pages: ['https://acme.com/panel'] },
+    { url: 'https://cdn.other.com/t.js', normalizedUrl: 'https://cdn.other.com/t.js', key: 'k3',
+      sources: ['dom'], statusCode: 200, kind: 'script', authStates: ['anon'], pages: ['https://acme.com/'] }
+  ],
+  findings: [{ id: 'f1', type: 'AWS Access Key', category: 'secret', confidence: 'high', value: 'AKIA…**LE', file: 'https://acme.com/app.js' }],
+  origins: [{ path: 'src/pay.ts' }, { path: 'src/ui/button.ts' }],
+  notes: 'IDOR suspected on /v1/export',
+  triage: { k2: 'interesting', k3: 'ignored' },
+  analyses: [{ label: 'Attack surface', model: 'm1', at: Date.now(), text: 'Looks fine.' }]
+};
+
+test('HTML rapor tum bolumleri icerir ve tek dosyadir', () => {
+  const html = report.buildSessionReport(reportInput);
+  assert.ok(html.startsWith('<!DOCTYPE html>'));
+  assert.ok(html.includes('Acme Q3'));
+  assert.ok(html.includes('*.acme.com'), 'kapsam yazilmali');
+  assert.ok(html.includes('IDOR suspected'), 'notlar');
+  assert.ok(html.includes('AWS Access Key'), 'bulgular');
+  assert.ok(html.includes('Only seen while authenticated'), 'auth-only bolumu');
+  assert.ok(html.includes('admin.js'));
+  assert.ok(html.includes('Recovered sources (2)'), 'kaynak bolumu basligi');
+  assert.ok(html.includes('pay.ts') && html.includes('└──'), 'agac hiyerarsi olarak cizilir');
+  assert.ok(html.includes('Attack surface'), 'AI analizleri');
+  // Harici kaynak olmamali — tek dosya calismali
+  assert.ok(!/<script\b/i.test(html), 'raporda script olmamali');
+  assert.ok(!/https?:\/\/(cdn|fonts|unpkg)/.test(html.replace(/https:\/\/(acme|cdn\.other)\.com/g, '')), 'harici varlik yok');
+});
+
+test('rapor kullanici verisini kacisla gomer (HTML enjeksiyonu yok)', () => {
+  const html = report.buildSessionReport({
+    ...reportInput,
+    session: { name: '<img src=x onerror=alert(1)>', scope: [] },
+    notes: '</pre><script>alert(2)</script>'
+  });
+  assert.ok(!html.includes('<img src=x'), 'ham HTML gecmemeli');
+  assert.ok(html.includes('&lt;img src=x'), 'kacisli gorunmeli');
+  assert.ok(!html.includes('<script>alert(2)'), 'script enjeksiyonu engellenmeli');
+});
+
+test('JSON disa aktarim tasinabilir ve tam', () => {
+  const parsed = JSON.parse(report.buildSessionJson(reportInput));
+  assert.strictEqual(parsed.kind, 'engagement');
+  assert.strictEqual(parsed.session.name, 'Acme Q3');
+  assert.strictEqual(parsed.entries.length, 3);
+  assert.strictEqual(parsed.findings.length, 1);
+  assert.strictEqual(parsed.triage.k2, 'interesting');
+  assert.ok(parsed.exportedAt);
+});
+
+test('bos angajman raporu da gecerli uretir', () => {
+  const html = report.buildSessionReport({ session: { name: 'Empty', scope: [] } });
+  assert.ok(html.includes('Empty'));
+  assert.ok(html.includes('Inventory (0)'));
 });
 
 runAll();

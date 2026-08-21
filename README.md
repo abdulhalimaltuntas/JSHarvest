@@ -13,7 +13,7 @@ A Manifest V3 extension that builds a deduplicated, classified inventory of ever
 [![Chrome 120+](https://img.shields.io/badge/chrome-120%2B-4285F4.svg)](#install)
 [![Firefox 140+](https://img.shields.io/badge/firefox-140%2B-FF7139.svg)](#install)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-e8a33d.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-50%20passing-3ddc97.svg)](test/run.mjs)
+[![Tests](https://img.shields.io/badge/tests-62%20passing-3ddc97.svg)](test/run.mjs)
 
 <img src="docs/screenshots/popup-scripts.png" alt="JSHarvest popup showing a page's script inventory" width="440">
 
@@ -68,6 +68,18 @@ Opt-in. Downloads first-party bundles and analyses them **as text** — no `eval
 <img src="docs/screenshots/findings-detail.png" alt="Findings view with a detail panel showing a masked secret" width="440">
 
 Secret values are masked **everywhere** — the list, the detail panel, the surrounding code context, exports, and anything sent to an AI provider. A raw secret is never stored, so it can never leak.
+
+### Engagements — the tool remembers your target, not just your tab
+
+A tab-only capture dies with the browser. An **engagement** does not.
+
+Attach a tab to a named engagement with a scope (`acme.com`, `*.acme.com`) and everything you browse **in scope** accumulates into one inventory — across tabs, across reloads, across days. Out-of-scope hosts are never written to it, so your personal browsing stays out of the engagement.
+
+- **Auth-state capture** — flip a switch when you log in. Scripts that only ever appear in the authenticated capture are marked **auth-only**: admin bundles, internal SDKs, feature-flagged modules. Usually the most interesting surface on the target.
+- **Triage** — mark rows **★ interesting**, *reviewed* or *not relevant*, and filter by them. On a 400-script list, knowing where you stopped is the difference between working and re-reading.
+- **Notes** — a scratchpad that travels with the engagement.
+- **Report** — export the whole engagement as one self-contained HTML file: inventory, risk flags, findings, auth-only surface, recovered source tree, AI analyses, notes and triage. The first draft of a pentest report.
+- **Portable** — export as JSON and hand it to a teammate.
 
 ### Diff, export, DevTools
 
@@ -140,8 +152,9 @@ Temporary add-ons are removed when Firefox restarts.
 | `Esc` | Close the panel, otherwise clear filters |
 | `Ctrl`/`Cmd` + `C` | Copy the filtered list |
 
-Views: **Scripts** · **Findings** · **Sources** · **Diff** · **AI**.
-Filters: first-party, third-party, bundles, source maps, risk, plus a `blob:`/`data:` toggle.
+Views: **Scripts** · **Findings** · **Sources** · **Diff** · **Session** · **AI**.
+Filters: first-party, third-party, bundles, source maps, risk, new, interesting, auth-only, plus a `blob:`/`data:` toggle.
+Right-click any row for triage marks, copy actions and **Send to AI**.
 
 > [!WARNING]
 > Deep Scan requests files from the site you are inspecting, and mining can surface sensitive data. Use it only on sites you own or are authorized to test.
@@ -161,9 +174,11 @@ lib/
   diff.js        history.js    snapshots and comparison
   ai.js          markdown.js   AI layer · safe Markdown renderer
   ai-history.js                saved analyses, per origin
+  sessions.js    triage.js     engagements, scope, auth state · triage marks
+  report.js                    self-contained HTML report · portable JSON
   export.js      settings.js   serializers · user options
 popup/  panel/  options/       three UI surfaces, one token system
-test/run.mjs                   50 tests, no dependencies
+test/run.mjs                   62 tests, no dependencies
 ```
 
 **Navigation epochs.** Every entry carries a navigation epoch. `onBeforeNavigate` bumps it without clearing the list; `onCommitted` purges only entries from the previous page. A script racing the commit already holds the new epoch, so it survives — while SPA route changes leave the list intact.
@@ -172,7 +187,9 @@ test/run.mjs                   50 tests, no dependencies
 
 **Cross-browser.** Every module imports `api` from `lib/browser-api.js` rather than touching `chrome.*` directly — Firefox's `chrome.*` alias is callback-based, so `await chrome.storage.session.get(…)` would silently resolve to `undefined` there.
 
-**Persistence split.** Live capture lives in `storage.session` and clears with the browser. Settings and Diff snapshots live in `storage.local`.
+**Persistence split.** Live per-tab capture lives in `storage.session` and clears with the browser. Everything meant to outlive it — engagements, triage marks, settings, Diff snapshots, saved analyses — lives in `storage.local`.
+
+**Engagements are a projection, not a rewrite.** Per-tab capture is untouched; when a tab is attached, the same entries are additionally merged into the engagement store, deduplicated on the same key and tagged with the auth state. That keeps the hot path simple and makes the engagement a union across tabs and time.
 
 ## Privacy
 
@@ -185,7 +202,7 @@ Two features reach the network, both off by default and both under your control:
 No dependencies are needed to build or test — plain ES modules and Node built-ins.
 
 ```bash
-node test/run.mjs          # 50 unit tests
+node test/run.mjs          # 62 unit tests
 node build.mjs             # emit dist/chrome and dist/firefox
 npm run lint:firefox       # web-ext lint (needs npm i)
 npm run package:firefox    # store-ready zip

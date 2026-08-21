@@ -11,6 +11,7 @@ import { looksLikeJs } from '../lib/classify.js';
 import { broadcast } from '../lib/messaging.js';
 import { runDeepScan, cancelDeepScan, isDeepScanRunning } from '../lib/deepscan.js';
 import { getSettings, toDeepScanOptions, DEFAULT_SETTINGS } from '../lib/settings.js';
+import * as sessions from '../lib/sessions.js';
 
 /** Izlenen istek tipleri. Lazy chunk'lar cogu zaman xhr/other olarak gelir. */
 const WATCHED_TYPES = ['script', 'xmlhttprequest', 'other'];
@@ -38,6 +39,93 @@ function safeAddListener(target, handler, filter, extraInfoSpec) {
   } catch (err) {
     console.warn('[JSHarvest] listener registration failed:', err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Angajman oturumlari
+// ---------------------------------------------------------------------------
+//
+// Sekme bazli yakalama (lib/store.js) oldugu gibi kalir; bir sekme bir oturuma
+// bagliysa ayni kayitlar KALICI oturum deposuna da islenir. Boylece sekme
+// kapansa, tarayici yeniden baslasa bile angajman envanteri birikmeye devam
+// eder. Kapsam disi host'lar oturuma hic yazilmaz.
+
+const ATTACH_KEY = 'session-attach';   // storage.session: { tabId: sessionId }
+const AUTH_KEY = 'session-auth';       // storage.session: { tabId: 'anon'|'auth' }
+
+async function readMap(key) {
+  try {
+    const stored = await api.storage.session.get(key);
+    const map = stored && stored[key];
+    return map && typeof map === 'object' ? map : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeMap(key, map) {
+  try { await api.storage.session.set({ [key]: map }); } catch { /* yoksayilir */ }
+}
+
+async function getAttachment(tabId) {
+  const map = await readMap(ATTACH_KEY);
+  return map[String(tabId)] || '';
+}
+
+async function setAttachment(tabId, sessionId) {
+  const map = await readMap(ATTACH_KEY);
+  if (sessionId) map[String(tabId)] = sessionId;
+  else delete map[String(tabId)];
+  await writeMap(ATTACH_KEY, map);
+}
+
+async function getAuthState(tabId) {
+  const map = await readMap(AUTH_KEY);
+  return map[String(tabId)] === 'auth' ? 'auth' : 'anon';
+}
+
+async function setAuthState(tabId, authState) {
+  const map = await readMap(AUTH_KEY);
+  map[String(tabId)] = authState === 'auth' ? 'auth' : 'anon';
+  await writeMap(AUTH_KEY, map);
+}
+
+/**
+ * Sekmede toplanan kayitlari bagli oturuma isler. Kapsam disi URL'ler atlanir —
+ * bu hem angajman hijyeni hem gizlilik korumasidir.
+ */
+async function projectToSession(tabId, rawEntries, pageUrl) {
+  if (!Array.isArray(rawEntries) || rawEntries.length === 0) return;
+  const sessionId = await getAttachment(tabId);
+  if (!sessionId) return;
+
+  const session = await sessions.getSession(sessionId);
+  if (!session || session.archived) return;
+
+  const scope = Array.isArray(session.scope) ? session.scope : [];
+  const inScope = scope.length === 0
+    ? rawEntries
+    : rawEntries.filter((e) => sessions.urlInScope(e.url, scope));
+  if (inScope.length === 0) return;
+
+  const authState = await getAuthState(tabId);
+  try {
+    await sessions.mergeEntries(sessionId, inScope, { authState, pageUrl });
+    await sessions.updateSession(sessionId, {});   // updatedAt tazelensin
+  } catch (err) {
+    console.warn('[JSHarvest] session merge failed:', err);
+  }
+}
+
+/** Navigasyonda kapsamina gore otomatik baglama. */
+async function autoAttach(tabId, url) {
+  const current = await getAttachment(tabId);
+  if (current) {
+    // Zaten bagli: kapsam disina cikildiysa bagi koparma, yalnizca kayit dursun.
+    return;
+  }
+  const match = await sessions.findSessionForUrl(url);
+  if (match) await setAttachment(tabId, match.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -132,8 +220,11 @@ async function recordNetworkHit(details, extra) {
   mimeByRequest.delete(details.requestId);
   if (!looksLikeJs(details.url, { type: details.type, contentType })) return;
   try {
-    await store.addEntries(details.tabId, [toNetworkEntry(details, extra)]);
+    const entry = toNetworkEntry(details, extra);
+    await store.addEntries(details.tabId, [entry]);
     scheduleBadge(details.tabId);
+    projectToSession(details.tabId, [entry], details.documentUrl || '')
+      .catch(() => { /* oturum yazilamazsa sekme verisi zaten duruyor */ });
   } catch (err) {
     console.warn('[JSHarvest] network entry store failed:', err);
   }
@@ -179,6 +270,7 @@ safeAddListener(
     store.commitNavigation(details.tabId, details.url)
       .then(() => scheduleBadge(details.tabId))
       .catch(() => { /* yoksayilir */ });
+    autoAttach(details.tabId, details.url).catch(() => { /* yoksayilir */ });
   },
   { url: [{ schemes: ['http', 'https', 'file'] }] }
 );
@@ -197,6 +289,7 @@ api.tabs.onRemoved.addListener((tabId) => {
   const timer = badgeTimers.get(tabId);
   if (timer) { clearTimeout(timer); badgeTimers.delete(tabId); }
   store.deleteTab(tabId).catch(() => { /* yoksayilir */ });
+  setAttachment(tabId, '').catch(() => { /* yoksayilir */ });
 });
 
 api.runtime.onInstalled.addListener(() => {
@@ -247,6 +340,8 @@ async function handleDomBatch(message, sender) {
     await store.setPageUrl(tabId, message.pageUrl);
   }
   if (added > 0) scheduleBadge(tabId);
+  projectToSession(tabId, normalized, message.pageUrl || '')
+    .catch(() => { /* yoksayilir */ });
   return { ok: true, added };
 }
 
@@ -265,6 +360,9 @@ async function handleGetTabData(message) {
       pageUrl = '';
     }
   }
+  const sessionId = await getAttachment(tabId);
+  const session = sessionId ? await sessions.getSession(sessionId) : null;
+
   return {
     ok: true,
     pageUrl,
@@ -272,7 +370,9 @@ async function handleGetTabData(message) {
     entries: Object.values(record.entries),
     findings: record.findings || [],
     origins: record.origins || [],
-    deepScanRunning: isDeepScanRunning(tabId)
+    deepScanRunning: isDeepScanRunning(tabId),
+    session: session ? { id: session.id, name: session.name, scope: session.scope } : null,
+    authState: await getAuthState(tabId)
   };
 }
 
@@ -303,7 +403,16 @@ async function handleMessage(message, sender) {
       const options = toDeepScanOptions(settings);
       // Await edilmez; ilerleme mesajlarla bildirilir.
       runDeepScan(tabId, options)
-        .then(() => scheduleBadge(tabId))
+        .then(async () => {
+          scheduleBadge(tabId);
+          // Deep Scan ciktilarini (bulgular, kurtarilan kaynaklar) oturuma isle.
+          const sessionId = await getAttachment(tabId);
+          if (!sessionId) return;
+          const record = await store.getRecord(tabId);
+          await sessions.mergeFindings(sessionId, record.findings || []);
+          await sessions.mergeOrigins(sessionId, record.origins || []);
+          await projectToSession(tabId, Object.values(record.entries), record.pageUrl || '');
+        })
         .catch((err) => {
           broadcast({ type: 'deep-scan-done', tabId, error: String(err && err.message ? err.message : err) });
         });
@@ -312,6 +421,54 @@ async function handleMessage(message, sender) {
     case 'deep-scan-cancel':
       cancelDeepScan(Number(message.tabId));
       return { ok: true };
+    // --- Angajman oturumlari ---
+    case 'session-list':
+      return { ok: true, sessions: await sessions.listSessions({ includeArchived: Boolean(message.includeArchived) }) };
+    case 'session-create': {
+      const created = await sessions.createSession({
+        name: message.name,
+        scope: message.scope,
+        autoAttach: message.autoAttach !== false
+      });
+      if (Number.isFinite(Number(message.tabId))) {
+        await setAttachment(Number(message.tabId), created.id);
+      }
+      return { ok: true, session: created };
+    }
+    case 'session-update':
+      return { ok: true, session: await sessions.updateSession(message.id, message.patch || {}) };
+    case 'session-delete':
+      await sessions.deleteSession(message.id);
+      return { ok: true };
+    case 'session-attach': {
+      const tabId = Number(message.tabId);
+      if (!Number.isFinite(tabId)) return { ok: false, error: 'invalid tabId' };
+      await setAttachment(tabId, message.sessionId || '');
+      const session = message.sessionId ? await sessions.getSession(message.sessionId) : null;
+      return { ok: true, session: session ? { id: session.id, name: session.name, scope: session.scope } : null };
+    }
+    case 'session-data': {
+      if (!message.id) return { ok: false, error: 'missing session id' };
+      const data = await sessions.getData(message.id);
+      return {
+        ok: true,
+        entries: Object.values(data.entries),
+        findings: data.findings,
+        origins: data.origins,
+        notes: data.notes
+      };
+    }
+    case 'session-summary':
+      return { ok: true, summary: await sessions.summary(message.id) };
+    case 'session-notes':
+      return { ok: true, notes: await sessions.setNotes(message.id, message.notes) };
+    case 'session-auth': {
+      const tabId = Number(message.tabId);
+      if (!Number.isFinite(tabId)) return { ok: false, error: 'invalid tabId' };
+      await setAuthState(tabId, message.authState);
+      return { ok: true, authState: await getAuthState(tabId) };
+    }
+
     case 'flush':
       await store.flush();
       return { ok: true };

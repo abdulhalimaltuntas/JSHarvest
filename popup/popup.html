@@ -35,11 +35,25 @@
       </div>
     </header>
 
+    <div class="sessionbar">
+      <button type="button" class="sesspill" id="sessionPill" title="Engagement session">
+        <span class="sesspill__dot" id="sessionDot"></span>
+        <span class="sesspill__name" id="sessionName">Tab only</span>
+      </button>
+      <button type="button" class="authtoggle" id="authToggle" title="Which auth state is being captured">
+        <span id="authLabel">Logged out</span>
+      </button>
+      <span class="sessionbar__count num" id="sessionCount"></span>
+    </div>
+
+    <div class="sessmenu" id="sessionMenu" hidden role="menu"></div>
+
     <nav class="tabs" id="tabs" role="tablist" aria-label="Views">
       <button type="button" class="tab is-active" data-view="scripts" role="tab">Scripts</button>
       <button type="button" class="tab" data-view="findings" role="tab">Findings<span class="tab__count num" id="tabFindings">0</span></button>
       <button type="button" class="tab" data-view="sources" role="tab">Sources<span class="tab__count num" id="tabSources">0</span></button>
       <button type="button" class="tab" data-view="diff" role="tab">Diff</button>
+      <button type="button" class="tab" data-view="session" role="tab">Session</button>
       <button type="button" class="tab" data-view="ai" role="tab">AI</button>
     </nav>
 
@@ -65,6 +79,9 @@
         <button type="button" class="chip" data-filter="bundles">Bundles</button>
         <button type="button" class="chip" data-filter="maps">Sourcemap</button>
         <button type="button" class="chip chip--risk" data-filter="risk" title="Third-party without SRI, or mixed content">Risk</button>
+        <button type="button" class="chip" data-filter="new" title="Not triaged yet">New</button>
+        <button type="button" class="chip chip--interesting" data-filter="interesting" title="Marked interesting">Interesting</button>
+        <button type="button" class="chip chip--authonly" data-filter="authonly" title="Only seen while logged in">Auth-only</button>
         <button type="button" class="chip chip--toggle" id="chipSpecial" data-toggle="special" title="Show blob: and data: URLs">blob/data</button>
       </div>
     </div>
@@ -96,6 +113,35 @@
         <p class="state__title">No match</p>
         <p class="state__hint">Adjust the search or clear the active filter (Esc).</p>
       </div>
+
+      <!-- Angajman oturumu gorunumu -->
+      <section class="sessionview" id="sessionView" hidden>
+        <div class="sessionview__empty" id="sessionEmpty" hidden>
+          <p class="state__title">No engagement attached</p>
+          <p class="state__hint">A tab-only capture is cleared when the browser closes. Attach this tab to an engagement and everything you browse in scope accumulates in one place — across tabs and across days.</p>
+          <button type="button" class="btn btn--accent btn--sm" id="sessionCreateEmpty">Create engagement</button>
+        </div>
+
+        <div class="sessionview__body" id="sessionBody" hidden>
+          <div class="sessionview__stats" id="sessionStats"></div>
+
+          <label class="sessionview__field">
+            <span class="label">Scope — one host pattern per line</span>
+            <textarea id="sessionScope" class="sessionview__scope mono" spellcheck="false" placeholder="acme.com&#10;*.acme.com"></textarea>
+          </label>
+
+          <label class="sessionview__field">
+            <span class="label">Notes</span>
+            <textarea id="sessionNotes" class="sessionview__notes" placeholder="What you found, what to check next…"></textarea>
+          </label>
+
+          <div class="sessionview__actions">
+            <button type="button" class="btn btn--sm" id="sessionReport">Export report</button>
+            <button type="button" class="btn btn--sm" id="sessionExportJson">Export JSON</button>
+            <button type="button" class="btn btn--sm btn--danger" id="sessionDelete">Delete</button>
+          </div>
+        </div>
+      </section>
 
       <!-- AI analiz gorunumu -->
       <section class="ai" id="aiPanel" hidden>

@@ -940,3 +940,258 @@ html, body {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent-strong);
 }
+
+/* ---------- Angajman oturumu cubugu ---------- */
+
+.sessionbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.sesspill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 210px;
+  font: inherit;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.sesspill:hover { background: var(--surface-2); color: var(--text); }
+.sesspill:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.sesspill.is-attached {
+  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-strong);
+}
+
+.sesspill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+
+.sesspill.is-attached .sesspill__dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.sesspill__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authtoggle {
+  font: inherit;
+  font-size: var(--t-xs);
+  font-weight: 500;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+.authtoggle:hover { background: var(--surface-2); color: var(--text); }
+.authtoggle:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.authtoggle.is-auth {
+  background: var(--signal-tint);
+  border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  color: var(--signal);
+  font-weight: 600;
+}
+
+.sessionbar__count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* Oturum menusu */
+
+.sessmenu {
+  position: absolute;
+  top: 92px;
+  left: 12px;
+  z-index: 25;
+  min-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-3);
+  display: flex;
+  flex-direction: column;
+  animation: pop var(--fast) var(--ease);
+}
+
+.sessmenu[hidden] { display: none; }
+
+.sessmenu__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+  text-align: left;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.sessmenu__item:hover { background: var(--surface-3); color: var(--text); }
+.sessmenu__item:focus-visible { outline: none; box-shadow: var(--ring); }
+.sessmenu__item.is-active { background: var(--accent-tint); color: var(--accent-strong); }
+
+.sessmenu__name { font-size: var(--t-sm); font-weight: 600; }
+.sessmenu__meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+.sessmenu__sep { height: 1px; margin: 4px 2px; background: var(--line); }
+
+/* ---------- Oturum gorunumu ---------- */
+
+.sessionview {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  background: var(--ground);
+}
+
+.sessionview[hidden] { display: none; }
+
+.sessionview__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 100%;
+  padding: 0 34px;
+  text-align: center;
+}
+
+.sessionview__empty[hidden] { display: none; }
+.sessionview__body[hidden] { display: none; }
+
+.sessionview__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 14px 18px;
+}
+
+.sessionview__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.sstat {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.sstat__value {
+  display: block;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--t-lg);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.sstat__label {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.sstat--auth .sstat__value { color: var(--signal); }
+.sstat--risk .sstat__value { color: var(--risk); }
+
+.sessionview__field { display: flex; flex-direction: column; gap: 5px; }
+
+.sessionview__scope,
+.sessionview__notes {
+  font: inherit;
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+  outline: none;
+}
+
+.sessionview__scope { font-family: var(--font-mono); min-height: 68px; }
+.sessionview__notes { min-height: 110px; }
+
+.sessionview__scope:focus,
+.sessionview__notes:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.sessionview__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---------- Triyaj ---------- */
+
+.chip--interesting.is-active {
+  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-strong);
+}
+
+.chip--authonly.is-active {
+  background: var(--signal-tint);
+  border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  color: var(--signal);
+}
+
+.row.is-reviewed { opacity: 0.62; }
+.row.is-ignored { opacity: 0.4; }
+
+.row.is-interesting::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.badge--triage { color: var(--accent-strong); background: var(--accent-tint); }
+.badge--authonly { color: var(--signal); background: var(--signal-tint); }
