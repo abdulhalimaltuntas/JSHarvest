@@ -1,0 +1,21 @@
+{
+  "name": "jsharvest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Manifest V3 extension that detects, deduplicates, classifies and exports every JavaScript resource loaded by a page. Chrome + Firefox.",
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.mjs",
+    "build": "node build.mjs",
+    "run:firefox": "web-ext run --source-dir dist/firefox",
+    "lint:firefox": "web-ext lint --source-dir dist/firefox",
+    "package:firefox": "web-ext build --source-dir dist/firefox --artifacts-dir dist/artifacts --overwrite-dest",
+    "sign:firefox": "web-ext sign --source-dir dist/firefox --channel listed"
+  },
+  "devDependencies": {
+    "web-ext": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

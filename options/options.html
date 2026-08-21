@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>JSHarvest — Options</title>
+  <link rel="stylesheet" href="../styles/tokens.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <h1>JSHarvest <span>Options</span></h1>
+      <p class="lead">Behaviour, Deep Scan aggressiveness and persistence. Changes save instantly.</p>
+    </header>
+
+    <section class="group">
+      <h2>Deep Scan</h2>
+      <p class="note">Deep Scan sends extra requests to the target server. Only use it on sites you are authorized to test.</p>
+
+      <label class="row">
+        <input type="checkbox" id="deepScanVerify">
+        <span><strong>Verify discovered chunks (HEAD)</strong><em>Promote inferred chunk URLs to confirmed when they return 200.</em></span>
+      </label>
+      <label class="row">
+        <input type="checkbox" id="deepScanRecursive">
+        <span><strong>Recursive scan</strong><em>Also scan discovered first-party chunks for further references.</em></span>
+      </label>
+      <label class="row row--inline">
+        <span><strong>Recursion depth</strong><em>How deep to follow discovered chunks (0–3).</em></span>
+        <input type="number" id="deepScanMaxDepth" min="0" max="3" step="1">
+      </label>
+      <label class="row">
+        <input type="checkbox" id="deepScanSources">
+        <span><strong>Recover original sources (source maps)</strong><em>Fetch <code>.map</code> files and extract the original source file tree.</em></span>
+      </label>
+      <label class="row">
+        <input type="checkbox" id="deepScanMine">
+        <span><strong>Mine secrets &amp; endpoints</strong><em>Scan fetched first-party JS for API keys, tokens and internal endpoints. Values are masked in the UI.</em></span>
+      </label>
+    </section>
+
+    <section class="group">
+      <h2>Interface</h2>
+      <label class="row">
+        <input type="checkbox" id="showBadge">
+        <span><strong>Toolbar badge count</strong><em>Show the number of collected scripts on the extension icon.</em></span>
+      </label>
+      <label class="row">
+        <input type="checkbox" id="showSpecialByDefault">
+        <span><strong>Show blob: / data: by default</strong><em>Include opaque script sources in the list without toggling.</em></span>
+      </label>
+      <label class="row row--inline">
+        <span><strong>Default export format</strong></span>
+        <select id="defaultExportFormat">
+          <option value="txt">TXT</option>
+          <option value="json">JSON</option>
+          <option value="csv">CSV</option>
+          <option value="md">Markdown</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="group">
+      <h2>AI analysis <span class="beta">bring your own key</span></h2>
+      <p class="note">The AI layer sends the collected inventory (script URLs, third-party vendors, bundle names, mined findings, recovered source paths) to the provider you choose, using <strong>your</strong> API key. Raw secret values are never stored and never sent. Only enable this for pages you are authorized to assess.</p>
+
+      <label class="row">
+        <input type="checkbox" id="aiEnabled">
+        <span><strong>Enable AI analysis</strong><em>Adds an “AI” tab to the popup for deep, professional analysis.</em></span>
+      </label>
+
+      <label class="row row--inline">
+        <span><strong>API key</strong><em>That is all JSHarvest needs — the provider and model are detected from the key. Stored locally in this browser, never synced.</em></span>
+        <input type="password" id="aiKey" spellcheck="false" autocomplete="off" placeholder="sk-ant-… · sk-… · AIza… · gsk_…">
+      </label>
+
+      <p class="providers">Works with <strong>Anthropic</strong>, <strong>OpenAI</strong>, <strong>Google Gemini</strong>, <strong>Groq</strong> and <strong>OpenRouter</strong> keys.</p>
+
+      <label class="row row--inline">
+        <span><strong>Response length</strong><em>Upper bound on tokens per answer.</em></span>
+        <input type="number" id="aiMaxTokens" min="256" max="8192" step="128">
+      </label>
+
+      <label class="row">
+        <input type="checkbox" id="aiRedact">
+        <span><strong>Redact context</strong><em>Withhold file paths and raw endpoint values from the AI (secret values are already masked regardless).</em></span>
+      </label>
+
+      <div class="row row--actions">
+        <span class="ai-status" id="aiStatus"></span>
+        <button type="button" class="btn" id="aiTest">Test connection</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Persistence &amp; history</h2>
+      <label class="row">
+        <input type="checkbox" id="persistHistory">
+        <span><strong>Keep per-origin capture history</strong><em>Store lightweight snapshots so Diff mode can compare captures across reloads and deploys.</em></span>
+      </label>
+      <label class="row row--inline">
+        <span><strong>Snapshots per origin</strong><em>Older snapshots are dropped beyond this limit.</em></span>
+        <input type="number" id="historyLimit" min="1" max="200" step="1">
+      </label>
+      <div class="row row--actions">
+        <button type="button" class="btn btn--danger" id="clearHistory">Clear all history</button>
+        <button type="button" class="btn" id="resetDefaults">Reset to defaults</button>
+      </div>
+    </section>
+
+    <p class="saved" id="saved" hidden>Saved ✓</p>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

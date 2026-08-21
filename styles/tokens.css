@@ -1,0 +1,212 @@
+/* styles/tokens.css — JSHarvest tasarim sistemi.
+   Tum yuzeyler (popup, devtools paneli, ayarlar) bu dosyayi kullanir.
+
+   RENK SEMANTIGI (dekorasyon degil, anlam):
+     signal (yesil)  = first-party — senin kodun
+     foreign (kehribar) = third-party — yabanci kod
+     risk (kirmizi)  = SRI yok / karisik icerik
+     infer (menekse) = JSHarvest'in kendi cikardigi/urettigi seyler
+   Aksiyon rengi de menekse: arayuzde "JSHarvest'in yaptigi is" hep ayni ton.
+
+   Harici font yok (eklenti CSP'si uzak kaynaklara izin vermez); karakter
+   agirlik/aralik/olcek ve tablo rakamlariyla kuruluyor. */
+
+:root {
+  color-scheme: dark light;
+
+  /* --- Zemin ve yuzeyler (koyu: varsayilan) --- */
+  --ground: #0a0d13;
+  --surface: #10141c;
+  --surface-2: #161c26;
+  --surface-3: #1d2531;
+  --line: #232c3a;
+  --line-soft: #1a212c;
+
+  /* --- Metin --- */
+  --text: #e7ecf5;
+  --text-dim: #9aa5ba;
+  --text-faint: #67718a;
+
+  /* --- Semantik --- */
+  --signal: #3ddc97;
+  --signal-tint: rgba(61, 220, 151, 0.12);
+  --foreign: #e8a33d;
+  --foreign-tint: rgba(232, 163, 61, 0.13);
+  --risk: #ff6b60;
+  --risk-tint: rgba(255, 107, 96, 0.14);
+  --infer: #9b8cff;
+  --infer-tint: rgba(155, 140, 255, 0.14);
+  --neutral-tint: rgba(154, 165, 186, 0.10);
+
+  /* --- Aksiyon / marka --- */
+  --accent: #9b8cff;
+  --accent-strong: #b3a6ff;
+  --accent-tint: rgba(155, 140, 255, 0.14);
+  --on-accent: #14101f;
+
+  /* --- Yukselti --- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --glow: radial-gradient(120% 80% at 18% -20%, rgba(155, 140, 255, 0.18), transparent 62%);
+  --ring: 0 0 0 2px var(--ground), 0 0 0 4px var(--accent);
+
+  /* --- Bicim --- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 13px;
+  --r-pill: 999px;
+
+  /* --- Tipografi --- */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --t-micro: 10px;    /* buyuk harf etiketler */
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-md: 13px;
+  --t-lg: 15px;
+  --track-label: 0.09em;
+
+  /* --- Hareket --- */
+  --ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --fast: 110ms;
+  --med: 190ms;
+
+  /* --- Olcum --- */
+  --row-h: 56px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f4f5f8;
+    --surface: #ffffff;
+    --surface-2: #f1f3f7;
+    --surface-3: #e8ebf1;
+    --line: #dde1e9;
+    --line-soft: #e9ecf2;
+
+    --text: #131722;
+    --text-dim: #545c6b;
+    --text-faint: #6d7688;
+
+    --signal: #12996a;
+    --signal-tint: rgba(18, 153, 106, 0.12);
+    --foreign: #a4671a;
+    --foreign-tint: rgba(164, 103, 26, 0.12);
+    --risk: #cf3529;
+    --risk-tint: rgba(207, 53, 41, 0.11);
+    --infer: #5b45d8;
+    --infer-tint: rgba(91, 69, 216, 0.11);
+    --neutral-tint: rgba(89, 97, 111, 0.09);
+
+    --accent: #5b45d8;
+    --accent-strong: #4a35c4;
+    --accent-tint: rgba(91, 69, 216, 0.10);
+    --on-accent: #ffffff;
+
+    --shadow-1: 0 1px 2px rgba(18, 23, 34, 0.07);
+    --shadow-2: 0 4px 14px rgba(18, 23, 34, 0.10);
+    --shadow-3: 0 16px 40px rgba(18, 23, 34, 0.16);
+    --glow: radial-gradient(120% 80% at 18% -20%, rgba(91, 69, 216, 0.10), transparent 62%);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-md);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Rakamlar hizali dursun — olcum aleti hissi. */
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* --- Ortak primitifler ------------------------------------------------- */
+
+.label {
+  font-size: var(--t-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.btn {
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--fast) var(--ease),
+              border-color var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
+}
+
+.btn:hover { background: var(--surface-3); border-color: var(--text-faint); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.btn[disabled] { opacity: 0.45; cursor: default; transform: none; }
+
+.btn--sm { padding: 4px 9px; font-size: var(--t-xs); }
+.btn--ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn--ghost:hover { background: var(--surface-2); color: var(--text); }
+
+.btn--accent {
+  background: var(--accent-tint);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.btn--accent:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
+
+.btn--danger { background: transparent; border-color: transparent; color: var(--risk); }
+.btn--danger:hover { background: var(--risk-tint); border-color: color-mix(in srgb, var(--risk) 35%, transparent); }
+
+.field {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--ground);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.field::placeholder { color: var(--text-faint); }
+.field:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+/* Ince, yuzeye karisan kaydirma cubugu. */
+* { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--r-pill);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--line); background-clip: content-box; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

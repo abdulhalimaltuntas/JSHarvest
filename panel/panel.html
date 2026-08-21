@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>JSHarvest Panel</title>
+  <link rel="stylesheet" href="../styles/tokens.css">
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div class="panel">
+    <header class="bar">
+      <span class="brand">JSHarvest</span>
+      <input id="search" type="search" class="search" placeholder="Filter…" autocomplete="off" spellcheck="false" aria-label="Filter">
+      <div class="chips" id="chips">
+        <button type="button" class="chip is-active" data-filter="all">All</button>
+        <button type="button" class="chip" data-filter="first">1st</button>
+        <button type="button" class="chip" data-filter="third">3rd</button>
+        <button type="button" class="chip" data-filter="bundles">Bundles</button>
+        <button type="button" class="chip" data-filter="maps">Map</button>
+        <button type="button" class="chip" data-filter="risk">Risk</button>
+      </div>
+      <span class="spacer"></span>
+      <span class="summary" id="summary">0 scripts</span>
+      <button type="button" class="btn" id="deepScan">Deep Scan</button>
+      <button type="button" class="btn" id="exportBtn">Export</button>
+      <button type="button" class="btn btn--danger" id="clear">Clear</button>
+    </header>
+
+    <div class="thead" id="thead">
+      <span class="th th--file" data-sort="fileName">File / URL</span>
+      <span class="th th--party" data-sort="party">Party</span>
+      <span class="th th--kind" data-sort="kind">Kind</span>
+      <span class="th th--vendor" data-sort="vendor">Vendor</span>
+      <span class="th th--status" data-sort="statusCode">Status</span>
+      <span class="th th--size" data-sort="size">Size</span>
+      <span class="th th--src" data-sort="sources">Sources</span>
+    </div>
+
+    <div class="tbody" id="tbody"><div class="scroller" id="scroller"></div></div>
+
+    <div class="empty" id="empty">Loading JSHarvest…</div>
+    <div class="toast" id="toast" hidden></div>
+  </div>
+  <!-- Klasik script: DevTools panelinde statik ES modulleri guvenilir degil.
+       panel.js bagimliliklari dinamik import ile alir. -->
+  <script src="panel.js"></script>
+</body>
+</html>

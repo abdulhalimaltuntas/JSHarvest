@@ -1,0 +1,187 @@
+/* options/options.css — token'lar ../styles/tokens.css'ten gelir. */
+
+body { line-height: 1.55; }
+
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+
+/* ---------- Baslik ---------- */
+
+.head { position: relative; padding-bottom: 6px; }
+
+.head h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.head h1 span {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.lead {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: var(--t-md);
+  max-width: 56ch;
+}
+
+/* ---------- Gruplar ---------- */
+
+.group {
+  position: relative;
+  margin-top: 26px;
+  padding: 18px 22px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.group h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: var(--t-micro);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.beta {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent-strong);
+  background: var(--accent-tint);
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+}
+
+.note {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--foreign-tint);
+  border: 1px solid color-mix(in srgb, var(--foreign) 28%, transparent);
+  color: var(--text);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+}
+
+/* ---------- Satirlar ---------- */
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 13px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.group .row:first-of-type { border-top: 0; }
+
+.row span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.row strong { font-weight: 600; font-size: var(--t-md); }
+.row em { color: var(--text-faint); font-style: normal; font-size: var(--t-sm); line-height: 1.5; }
+.row code {
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+}
+
+.row input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex: none;
+  cursor: pointer;
+}
+
+.row--inline { align-items: center; justify-content: space-between; gap: 20px; }
+
+.row--inline input[type="number"],
+.row--inline input[type="text"],
+.row--inline input[type="password"],
+.row--inline select {
+  font: inherit;
+  font-size: var(--t-sm);
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--ground);
+  color: var(--text);
+  outline: none;
+  flex: none;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+
+.row--inline input[type="number"] { width: 96px; font-family: var(--font-mono); }
+.row--inline select { min-width: 200px; }
+.row--inline input[type="text"],
+.row--inline input[type="password"] { min-width: 280px; font-family: var(--font-mono); }
+
+.row--inline input:focus,
+.row--inline select:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.row--actions { gap: 10px; justify-content: flex-end; align-items: center; }
+
+.providers {
+  margin: 2px 0 0;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--t-sm);
+}
+
+.providers strong { color: var(--text); font-weight: 600; }
+
+.ai-status {
+  margin-right: auto;
+  font-size: var(--t-sm);
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+}
+
+.ai-status.is-ok { color: var(--signal); }
+.ai-status.is-err { color: var(--risk); }
+
+/* ---------- Kaydedildi bildirimi ---------- */
+
+.saved {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 9px 18px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
+  color: var(--signal);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  box-shadow: var(--shadow-2);
+}
+
+.saved[hidden] { display: none; }

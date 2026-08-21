@@ -1,0 +1,22 @@
+# Bagimliliklar (yalnizca web-ext lint/paketleme icin; calisma zamani bagimliligi yok)
+node_modules/
+
+# Derleme ciktisi — build.mjs ile yeniden uretilir
+dist/
+
+# Paketler
+*.zip
+*.xpi
+
+# web-ext gecici dosyalari
+.web-ext-artifacts/
+
+# Hata ayiklama ekran goruntuleri
+sorun.png
+
+# Isletim sistemi / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
