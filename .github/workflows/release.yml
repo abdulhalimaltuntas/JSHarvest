@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0). Must already exist."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve version
+        id: v
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify manifests match the tag
+        run: |
+          VERSION="${{ steps.v.outputs.version }}"
+          for m in manifest.json manifest.firefox.json; do
+            got=$(node -p "require('./$m').version")
+            if [ "$got" != "$VERSION" ]; then
+              echo "::error::$m says $got but the tag says $VERSION. Bump the manifest before tagging."
+              exit 1
+            fi
+          done
+          echo "Both manifests report $VERSION."
+
+      - name: Run tests
+        run: node test/run.mjs
+
+      - name: Build both targets
+        run: node build.mjs
+
+      - name: Lint the Firefox package
+        run: npx --yes web-ext lint --source-dir dist/firefox --output text
+
+      - name: Package
+        run: |
+          VERSION="${{ steps.v.outputs.version }}"
+          mkdir -p artifacts
+          (cd dist/chrome  && zip -qr "../../artifacts/jsharvest-$VERSION-chrome.zip"  .)
+          (cd dist/firefox && zip -qr "../../artifacts/jsharvest-$VERSION-firefox.zip" .)
+          ls -lh artifacts
+
+      - name: Write release notes
+        run: |
+          VERSION="${{ steps.v.outputs.version }}"
+          cat > notes.md <<EOF
+          ## Install
+
+          **Firefox** — download \`jsharvest-$VERSION-firefox.zip\`, then open \`about:debugging#/runtime/this-firefox\` → **Load Temporary Add-on…** and pick the zip.
+          Afterwards open \`about:addons\` → JSHarvest → **Permissions** and enable *Access your data for all websites*; Firefox MV3 treats host permissions as optional and the list stays empty without it.
+
+          **Chrome** — download \`jsharvest-$VERSION-chrome.zip\`, unzip it, then open \`chrome://extensions\`, enable **Developer mode** and use **Load unpacked** on the unzipped folder.
+
+          Both packages are built from this tag by CI: tests run, both targets are built from the same sources, and the Firefox package passes \`web-ext lint\` with no errors or warnings.
+
+          ## Verify
+
+          \`\`\`
+          sha256sum jsharvest-$VERSION-*.zip
+          \`\`\`
+
+          $(cd artifacts && sha256sum *.zip | sed 's/^/    /')
+          EOF
+          cat notes.md
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.v.outputs.tag }}"
+          gh release create "$TAG" artifacts/*.zip \
+            --title "JSHarvest ${{ steps.v.outputs.version }}" \
+            --notes-file notes.md \
+            --verify-tag
