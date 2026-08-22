@@ -1450,6 +1450,16 @@ api.runtime.onMessage.addListener((message) => {
   if (!message) return;
 
   // --- Background'da calisan AI analizinin akisi ---
+  if (message.type === 'ai-run-stage' && message.runId === state.aiRunId) {
+    if (message.stage === 'fetching-code') {
+      el.aiMeta.textContent = message.fetched
+        ? `reading ${message.fetched}/${message.total} script(s) · ${Math.round((message.chars || 0) / 1000)}K chars`
+        : 'reading page scripts…';
+    } else if (message.stage === 'analysing') {
+      el.aiMeta.textContent = `${message.files} script(s) sent · ${Math.round((message.chars || 0) / 1000)}K chars · thinking…`;
+    }
+    return;
+  }
   if (message.type === 'ai-run-delta' && message.runId === state.aiRunId) {
     state.aiText = message.text != null ? message.text : (state.aiText + message.chunk);
     paintAi();

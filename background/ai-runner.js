@@ -59,6 +59,7 @@ function snapshot(run) {
     text: run.text,
     model: run.model,
     provider: run.provider,
+    stage: run.stage || null,
     running: !run.done,
     error: run.error || ''
   };
@@ -150,6 +151,11 @@ export async function startRun({ tabId, data, analysis, question, target, histor
     target,
     history,
     signal: controller.signal,
+    onStage: (info) => {
+      // Kod indirme uzun surebilir; kullanici bekledigini bilsin.
+      run.stage = info;
+      broadcast({ type: 'ai-run-stage', runId, ...info });
+    },
     onDelta: (chunk) => {
       run.text += chunk;
       pending += chunk;

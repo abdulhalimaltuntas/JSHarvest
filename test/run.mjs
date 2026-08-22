@@ -1032,4 +1032,70 @@ test('popup.js tanimsiz referans olmadan yuklenir ve baslar', async () => {
   assert.ok(listeners.length > 10, 'olay dinleyicileri baglanmis olmali');
 });
 
+// ---------------------------------------------------------------------------
+console.log('\n[ai — script icerigi baglami]');
+
+const codeEntries = [
+  classify.decorate({ url: 'https://acme.com/static/main.abc123.js', size: 200000 }, 'https://acme.com/'),
+  classify.decorate({ url: 'https://acme.com/static/small.js', size: 500 }, 'https://acme.com/'),
+  classify.decorate({ url: 'https://cdn.other.com/jquery.min.js', size: 90000 }, 'https://acme.com/'),
+  classify.decorate({ url: 'https://cdn.other.com/widget.js', size: 9000 }, 'https://acme.com/'),
+  classify.decorate({ url: 'https://acme.com/app.js.map', kind: 'sourcemap' }, 'https://acme.com/')
+];
+
+test('hedef secimi: first-party once, bundle once, kutuphaneler ve map elenir', () => {
+  const picked = ai.selectCodeTargets(codeEntries, { thirdParty: false }).map((e) => e.fileName);
+  assert.ok(picked.includes('main.abc123.js'));
+  assert.ok(picked.includes('small.js'));
+  assert.ok(!picked.some((f) => f.includes('jquery')), 'bilinen kutuphane elenmeli');
+  assert.ok(!picked.some((f) => f.endsWith('.map')), 'source map kod degil');
+  assert.ok(!picked.includes('widget.js'), 'ucuncu taraf varsayilan olarak disarda');
+  assert.strictEqual(picked[0], 'main.abc123.js', 'bundle basta');
+
+  const withThird = ai.selectCodeTargets(codeEntries, { thirdParty: true }).map((e) => e.fileName);
+  assert.ok(withThird.includes('widget.js'), 'acikca istenirse ucuncu taraf da gelir');
+});
+
+test('kod indirme butceyi asmaz ve dosya basina kirpar', async () => {
+  const big = 'A'.repeat(50000);
+  globalThis.fetch = async () => ({ ok: true, text: async () => big });
+
+  const res = await ai.collectScriptCode(codeEntries, { budget: 30000, perFile: 20000, thirdParty: false });
+  assert.ok(res.budgetUsed <= 30000, 'toplam butce asilmamali: ' + res.budgetUsed);
+  for (const sample of res.samples) {
+    assert.ok(sample.code.length <= 20000, 'dosya basina sinir');
+    assert.strictEqual(sample.truncated, true, 'kirpildi olarak isaretlenmeli');
+  }
+  delete globalThis.fetch;
+});
+
+test('butce sifirsa hicbir istek atilmaz', async () => {
+  let called = 0;
+  globalThis.fetch = async () => { called++; return { ok: true, text: async () => 'x' }; };
+  const res = await ai.collectScriptCode(codeEntries, { budget: 0 });
+  assert.strictEqual(res.samples.length, 0);
+  assert.strictEqual(called, 0, 'butce yoksa ag trafigi de yok');
+  delete globalThis.fetch;
+});
+
+test('renderScriptCode kodu ve kirpma bilgisini baglama yazar', () => {
+  const out = ai.renderScriptCode([
+    { url: 'https://acme.com/a.js', code: 'el.innerHTML=location.hash', truncated: true, size: 9999, party: 'first' }
+  ]);
+  assert.ok(out.includes('SCRIPT SOURCE'));
+  assert.ok(out.includes('el.innerHTML=location.hash'), 'kodun kendisi gecmeli');
+  assert.ok(out.includes('first-party'));
+  assert.ok(out.includes('truncated from 9999'), 'kirpildigi soylenmeli');
+  assert.strictEqual(ai.renderScriptCode([]), '');
+});
+
+test('DOM sink analizi tanimli ve kod yoksa uydurmamasi soylenmis', () => {
+  const resolved = ai.resolveAnalysis('domxss');
+  assert.strictEqual(resolved.label, 'DOM sinks');
+  assert.ok(/innerHTML/.test(resolved.instruction));
+  assert.ok(/location\.hash/.test(resolved.instruction));
+  assert.ok(/do not speculate from filenames/i.test(resolved.instruction), 'kod yoksa tahmin yasak');
+  assert.ok(/sink alone is not a finding/i.test(resolved.instruction), 'yanlis pozitif dengesi');
+});
+
 runAll();

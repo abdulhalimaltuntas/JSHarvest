@@ -94,6 +94,26 @@
       </div>
 
       <label class="row">
+        <input type="checkbox" id="aiIncludeCode">
+        <span><strong>Send script source to the AI</strong><em>Downloads the page's JavaScript and includes it in the request, so the model reads the real code instead of guessing from URLs. Required for DOM sink analysis. Costs tokens — the budget below caps it.</em></span>
+      </label>
+
+      <label class="row row--inline">
+        <span><strong>Code budget</strong><em>Total characters of source sent per analysis. ~4 characters ≈ 1 token.</em></span>
+        <input type="number" id="aiCodeBudget" min="10000" max="600000" step="10000">
+      </label>
+
+      <label class="row row--inline">
+        <span><strong>Per-file limit</strong><em>How much of a single bundle to send before truncating.</em></span>
+        <input type="number" id="aiCodePerFile" min="4000" max="200000" step="4000">
+      </label>
+
+      <label class="row">
+        <input type="checkbox" id="aiCodeThirdParty">
+        <span><strong>Include third-party scripts</strong><em>Off by default: third-party files are usually known libraries that burn budget without telling you much. Turn on when the third party is the thing you are assessing.</em></span>
+      </label>
+
+      <label class="row">
         <input type="checkbox" id="aiIncludeSources">
         <span><strong>Include recovered source code</strong><em>When Deep Scan has rebuilt real source files from source maps, send a few of them to the AI. Far deeper analysis — and far more of your code leaves the browser.</em></span>
       </label>

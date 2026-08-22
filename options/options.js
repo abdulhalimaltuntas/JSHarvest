@@ -12,9 +12,10 @@ import {
 const CHECKBOXES = [
   'deepScanVerify', 'deepScanRecursive', 'deepScanSources', 'deepScanMine',
   'showBadge', 'showSpecialByDefault', 'persistHistory',
-  'aiEnabled', 'aiRedact', 'aiIncludeSources', 'aiSaveHistory'
+  'aiEnabled', 'aiRedact', 'aiIncludeSources', 'aiSaveHistory',
+  'aiIncludeCode', 'aiCodeThirdParty'
 ];
-const NUMBERS = ['deepScanMaxDepth', 'historyLimit', 'aiMaxTokens'];
+const NUMBERS = ['deepScanMaxDepth', 'historyLimit', 'aiMaxTokens', 'aiCodeBudget', 'aiCodePerFile'];
 const SELECTS = ['defaultExportFormat'];
 const TEXTS = ['aiModel'];
 
@@ -219,6 +220,8 @@ function collect() {
   patch.deepScanMaxDepth = Math.max(0, Math.min(3, parseInt(el('deepScanMaxDepth').value, 10) || 0));
   patch.historyLimit = Math.max(1, Math.min(200, parseInt(el('historyLimit').value, 10) || 20));
   patch.aiMaxTokens = Math.max(256, Math.min(8192, parseInt(el('aiMaxTokens').value, 10) || 2000));
+  patch.aiCodeBudget = Math.max(10000, Math.min(600000, parseInt(el('aiCodeBudget').value, 10) || 120000));
+  patch.aiCodePerFile = Math.max(4000, Math.min(200000, parseInt(el('aiCodePerFile').value, 10) || 40000));
   return patch;
 }
 
