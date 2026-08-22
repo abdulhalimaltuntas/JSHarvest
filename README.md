@@ -13,7 +13,7 @@ A Manifest V3 extension that builds a deduplicated, classified inventory of ever
 [![Chrome 120+](https://img.shields.io/badge/chrome-120%2B-4285F4.svg)](#install)
 [![Firefox 140+](https://img.shields.io/badge/firefox-140%2B-FF7139.svg)](#install)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-e8a33d.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-73%20passing-3ddc97.svg)](test/run.mjs)
+[![Tests](https://img.shields.io/badge/tests-77%20passing-3ddc97.svg)](test/run.mjs)
 
 <img src="docs/screenshots/popup-scripts.png" alt="JSHarvest popup showing a page's script inventory" width="440">
 
@@ -106,7 +106,7 @@ Beyond the built-ins:
 - **Live model list** — the picker is downloaded from your provider, so everything they actually offer is selectable, with context window and price shown. No hardcoded guesses, no missing models.
 - **Right-click any row → Send to AI** — analyse a single script on its own, with its content fetched and included. Same for a single finding: *is this real, or a false positive?*
 - **Your own analyses** — define custom one-click prompts in Options; they appear as buttons next to the built-in ones.
-- **The model reads the actual code** — the page's JavaScript is downloaded and sent with the request, so analysis is grounded in what the code does rather than what its filename suggests. A character budget caps how much goes (default 120K, ~30K tokens), first-party and bundles first, known libraries skipped. Turn it off in Options if you only want metadata.
+- **The model reads the actual code** — the page's JavaScript is downloaded and sent with the request, so analysis is grounded in what the code does rather than what its filename suggests. A character budget caps how much goes (default 120K, ~30K tokens) and is spread across files rather than spent on the first two, first-party and bundles first, known libraries skipped. Files are chosen from the inventory, not by URL extension, so `app.js.zgz`, `bundle.js.gz` and extensionless endpoints are included. The model is told how many files it did *not* get and why. Turn it off in Options if you only want metadata.
 - **DOM sinks** — a built-in analysis that hunts client-side injection in that source: `innerHTML`, `document.write`, `eval`, `new Function`, `srcdoc`, jQuery `.html()` and the attacker-controllable inputs that might reach them.
 - **Recovered source code** (opt-in) — when Deep Scan has rebuilt original files from source maps, send those too. Original TypeScript beats minified bundles.
 - **Runs survive the popup** — the request is executed in the background, not in the popup page. Click away, close the popup, come back: the analysis is still going and reattaches when you reopen the AI tab.
@@ -182,7 +182,7 @@ lib/
   report.js                    self-contained HTML report · portable JSON
   export.js      settings.js   serializers · user options
 popup/  panel/  options/       three UI surfaces, one token system
-test/run.mjs                   73 tests, no dependencies
+test/run.mjs                   77 tests, no dependencies
 ```
 
 **Navigation epochs.** Every entry carries a navigation epoch. `onBeforeNavigate` bumps it without clearing the list; `onCommitted` purges only entries from the previous page. A script racing the commit already holds the new epoch, so it survives — while SPA route changes leave the list intact.
@@ -206,7 +206,7 @@ Two features reach the network, both off by default and both under your control:
 No dependencies are needed to build or test — plain ES modules and Node built-ins.
 
 ```bash
-node test/run.mjs          # 73 unit tests
+node test/run.mjs          # 77 unit tests
 node build.mjs             # emit dist/chrome and dist/firefox
 npm run lint:firefox       # web-ext lint (needs npm i)
 npm run package:firefox    # store-ready zip

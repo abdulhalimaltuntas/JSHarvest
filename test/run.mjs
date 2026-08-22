@@ -1098,4 +1098,60 @@ test('DOM sink analizi tanimli ve kod yoksa uydurmamasi soylenmis', () => {
   assert.ok(/sink alone is not a finding/i.test(resolved.instruction), 'yanlis pozitif dengesi');
 });
 
+// ---------------------------------------------------------------------------
+console.log('\n[ai — kod kapsama regresyonlari]');
+
+test('uzantisi .js olmayan JS dosyalari da secilir (Zimbra .js.zgz regresyonu)', () => {
+  // Bu bir gercek hatadan dogdu: envanterde 20 script varken AI"a yalnizca 1
+  // tanesinin kaynagi gidiyordu, cunku URL uzantisina gore eleniyordu.
+  const entries = [
+    classify.decorate({ url: 'https://ctflab.com/js/tr.js' }, 'https://ctflab.com/'),
+    classify.decorate({ url: 'https://ctflab.com/js/TinyMCE_all.js.zgz' }, 'https://ctflab.com/'),
+    classify.decorate({ url: 'https://ctflab.com/js/ContactsCore_all.js.zgz' }, 'https://ctflab.com/'),
+    classify.decorate({ url: 'https://ctflab.com/serve?id=7' }, 'https://ctflab.com/'),
+    classify.decorate({ url: 'https://ctflab.com/app.js.map', kind: 'sourcemap' }, 'https://ctflab.com/')
+  ];
+  const picked = ai.selectCodeTargets(entries, { thirdParty: false }).map((e) => e.normalizedUrl);
+  assert.ok(picked.some((u) => u.endsWith('TinyMCE_all.js.zgz')), '.js.zgz secilmeli');
+  assert.ok(picked.some((u) => u.endsWith('ContactsCore_all.js.zgz')));
+  assert.ok(picked.some((u) => u.includes('serve?id=7')), 'uzantisiz JS endpoint"i secilmeli');
+  assert.ok(!picked.some((u) => u.endsWith('.map')), 'source map kod degil');
+  assert.strictEqual(picked.length, 4);
+});
+
+test('butce tek dosyaya yedirilmez, cok dosyaya paylastirilir', async () => {
+  const many = Array.from({ length: 20 }, (_, i) =>
+    classify.decorate({ url: `https://acme.com/bundle${i}.js`, size: 900000 }, 'https://acme.com/'));
+  globalThis.fetch = async () => ({ ok: true, text: async () => 'X'.repeat(500000) });
+
+  const res = await ai.collectScriptCode(many, { budget: 120000, perFile: 40000 });
+  assert.ok(res.fetched >= 10, `20 dosyadan en az 10"u temsil edilmeli, gelen: ${res.fetched}`);
+  assert.ok(res.budgetUsed <= 120000, 'butce yine de asilmaz');
+  assert.strictEqual(res.candidates, 20);
+  delete globalThis.fetch;
+});
+
+test('ikili icerik butceyi yemez (gzip cozulmemis dosya)', async () => {
+  const binary = '\u0000\u0001\u0002\u0003'.repeat(3000);
+  globalThis.fetch = async () => ({ ok: true, text: async () => binary });
+  const entries = [classify.decorate({ url: 'https://acme.com/a.js.gz' }, 'https://acme.com/')];
+  const res = await ai.collectScriptCode(entries, { budget: 100000, perFile: 40000 });
+  assert.strictEqual(res.fetched, 0, 'ikili veri gonderilmemeli');
+  assert.strictEqual(res.skipped, 1);
+  assert.strictEqual(res.budgetUsed, 0, 'butce harcanmamali');
+  delete globalThis.fetch;
+});
+
+test('model neyi GORMEDIGINI ogrenir', () => {
+  const out = ai.renderScriptCode(
+    [{ url: 'https://a.com/x.js', code: 'var a=1', truncated: false, size: 7, party: 'first' }],
+    { inventory: 20, skipped: 2, thirdPartyExcluded: true }
+  );
+  assert.ok(out.includes('1 of 20'), 'kac dosyadan kaci gonderildi');
+  assert.ok(out.includes('19 file(s) are NOT included'));
+  assert.ok(out.includes('2 could not be read'));
+  assert.ok(/third-party files were excluded/.test(out));
+  assert.ok(/unknown rather than assuming it is safe/.test(out), 'eksik dosyalar guvenli sayilmamali');
+});
+
 runAll();
